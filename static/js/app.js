@@ -19,6 +19,13 @@ const state = {
     liveStream: null,
 };
 
+let resultsAutoRefreshTimer = null;
+let isAutoRefreshPaused = false;
+let lastResultsSignature = "";
+let lastRefreshTime = null;
+const recentlyUpdatedShooterIds = new Set();
+let pollCounter = 0;
+
 document.addEventListener("DOMContentLoaded", async () => {
     // Set default date in competition form to today
     const compDateInput = document.getElementById("compDate");
@@ -30,6 +37,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("activeCompetitionSelect").addEventListener("change", async (e) => {
         state.activeCompetitionId = parseInt(e.target.value, 10);
         localStorage.setItem("bgscore_active_comp", String(state.activeCompetitionId));
+        lastResultsSignature = "";
         await refreshCompetitionData();
     });
 
@@ -46,13 +54,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("galleryFileInput").addEventListener("change", handleFileSelected);
     document.getElementById("btnShowQrModal").addEventListener("click", openQrModal);
 
+        // Restore auto-save preference
+    const autoSaveCheckbox = document.getElementById("chkAutoSaveOnScan");
+    if (autoSaveCheckbox) {
+        autoSaveCheckbox.checked = localStorage.getItem("bgscore_auto_save_scan") === "1";
+    }
+
+    // Visibility change handler (immediate refresh when user switches back to browser tab)
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && state.activeTab === "results") {
+            pollResultsUpdate(false);
+        }
+    });
+
     await loadCompetitions();
+
+    // Start auto-refresh polling loop (every 3 seconds on results tab)
+    startAutoRefreshLoop();
 });
 
 // =========================================================================
 // Navigation & Toast Helpers
 // =========================================================================
-function switchTab(tabName) {
+async function switchTab(tabName) {
+    state.activeTab = tabName;
     document.querySelectorAll(".tab-panel").forEach((el) => el.classList.remove("active"));
     document.querySelectorAll(".nav-tab, .mob-nav-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.tab === tabName);
@@ -67,7 +92,14 @@ function switchTab(tabName) {
         stopLiveCamera();
     }
     if (tabName === "results") {
+        await pollResultsUpdate(false);
         renderResultsTable();
+    }
+    if (tabName === "shooters") {
+        renderManageShootersTable();
+    }
+    if (tabName === "competition") {
+        renderCompetitionsAndClassesTab();
     }
 }
 
@@ -140,8 +172,31 @@ async function refreshCompetitionData() {
 
     // Load shooters & scores for active competition
     try {
-        const res = await fetch(`/api/competitions/${comp.id}/shooters`);
-        state.shooters = await res.json();
+        const res = await fetch(`/api/competitions/${comp.id}/shooters`, {
+            cache: "no-store",
+            headers: { "Cache-Control": "no-cache" }
+        });
+        const freshShooters = await res.json();
+        if (state.shooters && state.shooters.length > 0) {
+            const oldMap = new Map(state.shooters.map((s) => [s.id, s]));
+            freshShooters.forEach((s) => {
+                const old = oldMap.get(s.id);
+                if (
+                    !old ||
+                    old.total_sum !== s.total_sum ||
+                    old.half1_sum !== s.half1_sum ||
+                    old.half2_sum !== s.half2_sum
+                ) {
+                    recentlyUpdatedShooterIds.add(s.id);
+                    setTimeout(() => {
+                        recentlyUpdatedShooterIds.delete(s.id);
+                    }, 4000);
+                }
+            });
+        }
+        state.shooters = freshShooters;
+        lastResultsSignature = computeShootersSignature(state.shooters);
+        lastRefreshTime = new Date();
     } catch (err) {
         state.shooters = [];
     }
@@ -152,6 +207,7 @@ async function refreshCompetitionData() {
     renderResultsTable();
     renderManageShootersTable();
     renderCompetitionsAndClassesTab();
+    updateLiveIndicatorUi();
 }
 
 function populateClassDropdowns(classes) {
@@ -800,6 +856,12 @@ async function applyEvaluationResult(data) {
 
     renderInteractivePassesEditor();
 
+    // If auto-save on scan is enabled and a shooter is selected with 5 passes:
+    const isAutoSave = localStorage.getItem("bgscore_auto_save_scan") === "1";
+    if (isAutoSave && state.selectedShooterId && state.evaluatedPasses && state.evaluatedPasses.length === 5) {
+        await saveEvaluatedScores(true);
+    }
+
     // Smoothly scroll to results on mobile
     if (window.innerWidth < 900) {
         document.getElementById("evaluationResultCard").scrollIntoView({ behavior: "smooth" });
@@ -916,9 +978,9 @@ function togglePasseCell(passeIdx, arrowIdx, ringVal) {
     renderInteractivePassesEditor();
 }
 
-async function saveEvaluatedScores() {
+async function saveEvaluatedScores(isAuto = false) {
     if (!state.selectedShooterId) {
-        showToast("Bitte zuerst einen Schützen auswählen!", "error");
+        if (!isAuto) showToast("Bitte zuerst einen Schützen auswählen!", "error");
         return;
     }
 
@@ -936,7 +998,30 @@ async function saveEvaluatedScores() {
             showToast(data.error || "Fehler beim Speichern.", "error");
             return;
         }
-        showToast(data.message || "Ergebnis erfolgreich gespeichert!", "success");
+
+        const shooter = state.shooters.find((s) => s.id === state.selectedShooterId);
+        const halfTotal = state.evaluatedPasses.reduce((acc, p) => acc + (p.sum || 0), 0);
+        const nameStr = shooter ? `${shooter.first_name} ${shooter.last_name}` : "Schütze";
+
+        recentlyUpdatedShooterIds.add(state.selectedShooterId);
+        setTimeout(() => {
+            recentlyUpdatedShooterIds.delete(state.selectedShooterId);
+        }, 4000);
+
+        const successMsg = isAuto
+            ? `⚡ Auto-Save: ${nameStr} (${halfTotal} Ringe, ${state.selectedHalf}. Hälfte) gespeichert & Ergebnisliste aktualisiert!`
+            : (data.message || `Ergebnis für ${nameStr} (${halfTotal} Ringe) erfolgreich gespeichert!`);
+
+        showToast(successMsg, "success");
+
+        // Show banner in scan card
+        const banner = document.getElementById("saveSuccessBanner");
+        const msgEl = document.getElementById("saveSuccessMsg");
+        if (banner && msgEl) {
+            msgEl.textContent = `${nameStr}: ${state.selectedHalf}. Hälfte (${halfTotal} Ringe) gespeichert · Ergebnisliste aktualisiert ✓`;
+            banner.classList.remove("hidden");
+        }
+
         await refreshCompetitionData();
     } catch (err) {
         showToast("Netzwerkfehler beim Speichern.", "error");
@@ -1026,6 +1111,9 @@ function renderResultsTable() {
         const grpStandText = formatGroupStandText(s.group_name, s.stand_number);
 
         const tr = document.createElement("tr");
+        if (recentlyUpdatedShooterIds.has(s.id)) {
+            tr.className = "tr-row-updated";
+        }
         tr.innerHTML = `
             <td>${rankHtml}</td>
             <td><strong>${escapeHtml(s.last_name)}, ${escapeHtml(s.first_name)}</strong></td>
@@ -1614,4 +1702,174 @@ function escapeHtml(str) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+}
+
+
+// =========================================================================
+// REAL-TIME AUTO-UPDATE & LIVE POLLING FOR RESULTS LIST
+// =========================================================================
+
+function computeShootersSignature(shooters) {
+    if (!shooters || !Array.isArray(shooters)) return "";
+    return shooters
+        .map((s) => `${s.id}:${s.total_sum}:${s.half1_sum}:${s.half2_sum}:${s.tens_count}:${s.nines_count}:${s.rank_overall}:${s.rank_in_class}`)
+        .join("|");
+}
+
+function updateLiveIndicatorUi() {
+    const pill = document.getElementById("liveStatusPill");
+    const label = document.getElementById("liveStatusLabel");
+    const timeEl = document.getElementById("liveLastUpdatedTime");
+    const toggleBtn = document.getElementById("btnToggleAutoRefresh");
+
+    if (!pill || !label || !timeEl) return;
+
+    if (isAutoRefreshPaused) {
+        pill.classList.add("paused");
+        label.innerHTML = "Live: <strong>Pausiert</strong>";
+        if (toggleBtn) toggleBtn.innerHTML = "▶️ Fortsetzen";
+    } else {
+        pill.classList.remove("paused");
+        label.innerHTML = "Live: <strong>Aktiv (alle 3s)</strong>";
+        if (toggleBtn) toggleBtn.innerHTML = "⏸️ Pause";
+    }
+
+    if (lastRefreshTime) {
+        const timeStr = lastRefreshTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        timeEl.textContent = `· ${timeStr}`;
+    }
+}
+
+function startAutoRefreshLoop() {
+    if (resultsAutoRefreshTimer) clearInterval(resultsAutoRefreshTimer);
+
+    resultsAutoRefreshTimer = setInterval(async () => {
+        if (document.hidden) return;
+        if (isAutoRefreshPaused) return;
+
+        if (state.activeTab === "results") {
+            await pollResultsUpdate(false);
+        } else {
+            pollCounter = (pollCounter + 1) % 4;
+            if (pollCounter === 0) {
+                await pollResultsUpdate(true);
+            }
+        }
+    }, 3000);
+}
+
+async function pollResultsUpdate(isBackground = false) {
+    const comp = getActiveCompetition();
+    if (!comp) return;
+
+    try {
+        const res = await fetch(`/api/competitions/${comp.id}/shooters`, {
+            cache: "no-store",
+            headers: { "Cache-Control": "no-cache" }
+        });
+        if (!res.ok) return;
+        const freshShooters = await res.json();
+
+        const newSig = computeShootersSignature(freshShooters);
+        const hasChanged = newSig !== lastResultsSignature;
+
+        if (hasChanged || !lastResultsSignature) {
+            if (state.shooters && state.shooters.length > 0) {
+                const oldMap = new Map(state.shooters.map((s) => [s.id, s]));
+                freshShooters.forEach((s) => {
+                    const old = oldMap.get(s.id);
+                    if (
+                        !old ||
+                        old.total_sum !== s.total_sum ||
+                        old.half1_sum !== s.half1_sum ||
+                        old.half2_sum !== s.half2_sum
+                    ) {
+                        recentlyUpdatedShooterIds.add(s.id);
+                        setTimeout(() => {
+                            recentlyUpdatedShooterIds.delete(s.id);
+                        }, 4000);
+                    }
+                });
+            }
+
+            state.shooters = freshShooters;
+            lastResultsSignature = newSig;
+            document.getElementById("navShooterCount").textContent = state.shooters.length;
+
+            if (state.activeTab === "results") {
+                renderResultsTable();
+            } else if (!isBackground) {
+                populateScanShooterDropdown();
+                renderManageShootersTable();
+            }
+        }
+
+        lastRefreshTime = new Date();
+        updateLiveIndicatorUi();
+    } catch (err) {
+        console.warn("Auto-Update Polling Fehler:", err);
+    }
+}
+
+async function manualRefreshResults() {
+    const btn = document.getElementById("btnManualRefreshResults");
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Lädt...";
+    }
+    try {
+        await refreshCompetitionData();
+        showToast("Ergebnisliste erfolgreich aktualisiert ✓", "success");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "🔄 Aktualisieren";
+        }
+    }
+}
+
+function toggleAutoRefreshResults() {
+    isAutoRefreshPaused = !isAutoRefreshPaused;
+    updateLiveIndicatorUi();
+    if (!isAutoRefreshPaused) {
+        pollResultsUpdate(false);
+    }
+}
+
+function toggleAutoSaveOnScan(enabled) {
+    localStorage.setItem("bgscore_auto_save_scan", enabled ? "1" : "0");
+    showToast(
+        enabled
+            ? "⚡ Auto-Speichern aktiv: Erkannte Schießzettel werden sofort gespeichert & die Ergebnisliste aktualisiert."
+            : "Auto-Speichern deaktiviert (Klick auf 'Speichern' erforderlich).",
+        "info"
+    );
+}
+
+function resetScanForNextSheet() {
+    state.evaluatedPasses = [];
+    state.passeCrops = [];
+    state.lastQrData = null;
+    const photoEl = document.getElementById("viewfinderPhotoPreview");
+    if (photoEl) {
+        photoEl.src = "";
+        photoEl.classList.add("hidden");
+    }
+    const idleEl = document.getElementById("viewfinderIdleBg");
+    if (idleEl) idleEl.classList.remove("hidden");
+    const previewDetails = document.getElementById("photoPreviewDetails");
+    if (previewDetails) previewDetails.classList.add("hidden");
+    const confBadge = document.getElementById("evalConfidenceBadge");
+    if (confBadge) confBadge.classList.add("hidden");
+    const emptyState = document.getElementById("evalEmptyState");
+    if (emptyState) emptyState.classList.remove("hidden");
+    const activeContent = document.getElementById("evalActiveContent");
+    if (activeContent) activeContent.classList.add("hidden");
+    const banner = document.getElementById("saveSuccessBanner");
+    if (banner) banner.classList.add("hidden");
+    renderQrDetectedBanner(null, null);
+    if (window.innerWidth < 900) {
+        const scanSec = document.getElementById("tab-scan");
+        if (scanSec) scanSec.scrollIntoView({ behavior: "smooth" });
+    }
 }

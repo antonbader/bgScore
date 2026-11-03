@@ -44,6 +44,16 @@ def inject_asset_version():
     return {"asset_version": version}
 
 
+@app.after_request
+def add_cache_control_headers(response):
+    """Ensure API endpoints are not cached aggressively by mobile browsers or proxies."""
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
