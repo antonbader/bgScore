@@ -95,6 +95,13 @@
                         </div>
                     </div>
 
+                    <div class="form-group scan-options-bar">
+                        <label class="auto-save-toggle-label" title="Wenn aktiviert, werden erkannte Passen automatisch gespeichert und die Ergebnisliste sofort aktualisiert">
+                            <input type="checkbox" id="chkAutoSaveOnScan" onchange="toggleAutoSaveOnScan(this.checked)">
+                            <span>⚡ Nach erfolgreichem Scan direkt speichern &amp; Ergebnisliste aktualisieren</span>
+                        </label>
+                    </div>
+
                     <div id="qrModeInfoHint" class="qr-mode-hint">
                         <span>📷 <strong>QR-Automatik aktiv:</strong> Du kannst direkt ein Foto aufnehmen oder hochladen – der QR-Code oben rechts auf dem ausgefüllten Ergebniszettel erkennt automatisch <em>Wettbewerb, Name, Verein, Datum, Klasse, Entfernung, Gruppe, Standnummer</em> sowie die <em>1. oder 2. Hälfte</em> und wählt den Schützen passend aus (oder legt ihn an). Alternativ kannst du unten auch manuell wählen.</span>
                     </div>
@@ -343,6 +350,22 @@
                             </div>
                         </div>
 
+                        <!-- Save Success Notification Banner -->
+                        <div id="saveSuccessBanner" class="save-success-banner hidden">
+                            <div class="save-success-text">
+                                <span class="save-success-icon">✓</span>
+                                <span id="saveSuccessMsg">Ergebnis erfolgreich gespeichert &amp; Ergebnisliste aktualisiert!</span>
+                            </div>
+                            <div class="save-success-actions">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('results')">
+                                    🏆 Zur Ergebnisliste
+                                </button>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="resetScanForNextSheet()">
+                                    📸 Nächsten Zettel scannen
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Collapsible Annotated Photo Preview & Frame Adjuster -->
                         <details id="photoPreviewDetails" class="photo-preview-details">
                             <summary>
@@ -407,6 +430,20 @@
                             <label for="resultsSearchInput">Suche:</label>
                             <input type="search" id="resultsSearchInput" class="form-control" placeholder="Name, Verein, Gruppe, Stand…" oninput="renderResultsTable()">
                         </div>
+                    </div>
+
+                    <div class="toolbar-live">
+                        <div class="live-status-pill" id="liveStatusPill" title="Automatische Live-Aktualisierung der Ergebnisliste">
+                            <span class="live-pulse-dot" id="livePulseDot"></span>
+                            <span id="liveStatusLabel">Live: <strong>Aktiv (alle 3s)</strong></span>
+                            <span class="live-time-hint" id="liveLastUpdatedTime" title="Letzte Aktualisierung"></span>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" id="btnToggleAutoRefresh" onclick="toggleAutoRefreshResults()" title="Automatische Live-Aktualisierung pausieren oder fortsetzen">
+                            ⏸️ Pause
+                        </button>
+                        <button type="button" class="btn btn-outline btn-sm" id="btnManualRefreshResults" onclick="manualRefreshResults()" title="Ergebnisliste jetzt sofort vom Server neu laden">
+                            🔄 Aktualisieren
+                        </button>
                     </div>
 
                     <div class="toolbar-exports">
