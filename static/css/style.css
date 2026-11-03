@@ -1327,6 +1327,89 @@ body {
     width: 100%;
     padding: 18px;
     box-shadow: var(--shadow-md);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-dialog.modal-lg {
+    max-width: 580px;
+}
+
+.pdf-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.pdf-mode-btn {
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #ffffff;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pdf-mode-btn strong {
+    font-size: 0.92rem;
+    color: var(--text-main);
+}
+
+.pdf-mode-btn small {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.pdf-mode-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.pdf-mode-btn.active {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+
+.pdf-preview-list {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #f8fafc;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pdf-preview-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 0.88rem;
+}
+
+.pdf-preview-empty {
+    padding: 12px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.pdf-modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
 }
 
 .modal-header {
@@ -1413,3 +1496,149 @@ body {
         display: none;
     }
 }
+
+/* =========================================================================
+   QR-Code Recognition Mode Selector & Detected Metadata Banner
+   ========================================================================= */
+.scan-mode-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+@media (max-width: 560px) {
+    .scan-mode-selector {
+        grid-template-columns: 1fr;
+    }
+}
+
+.scan-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border-color);
+    background: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+}
+
+.scan-mode-btn:hover {
+    border-color: #94a3b8;
+    background: #f1f5f9;
+}
+
+.scan-mode-btn.active {
+    border-color: var(--primary);
+    background: #eff6ff;
+    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.12);
+}
+
+.scan-mode-icon {
+    font-size: 1.35rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.scan-mode-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.scan-mode-text strong {
+    font-size: 0.88rem;
+    color: var(--text-main);
+}
+
+.scan-mode-text small {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+}
+
+.qr-mode-hint {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    color: #166534;
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    margin-bottom: 12px;
+}
+
+.qr-detected-banner {
+    background: linear-gradient(135deg, #ecfdf5 0%, #f0f9ff 100%);
+    border: 2px solid #10b981;
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 14px;
+}
+
+.qr-detected-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.qr-badge-pill {
+    background: #059669;
+    color: #ffffff;
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+}
+
+.qr-half-pill {
+    background: #1d4ed8;
+    color: #ffffff;
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+}
+
+.qr-detected-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 5px 12px;
+    font-size: 0.8rem;
+}
+
+.qr-field-item {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.qr-field-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.qr-field-val {
+    color: var(--text-main);
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.qr-field-match {
+    grid-column: 1 / -1;
+    margin-top: 2px;
+    padding-top: 4px;
+    border-top: 1px dashed #a7f3d0;
+    color: #047857;
+}
+

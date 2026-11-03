@@ -12,6 +12,8 @@ const state = {
     shooters: [],
     selectedShooterId: null,
     selectedHalf: 1, // 1 = Zettel A (Passe 1-5), 2 = Zettel B (Passe 6-10)
+    scanMode: "qr", // 'qr' = Automatisch über QR-Code erkennen, 'manual' = Manuell auswählen
+    lastQrData: null,
     evaluatedPasses: [], // Array of 5 objects: { passe_number, arrows: [10,9..], confidences: [1..], sum }
     passeCrops: [],
     liveStream: null,
@@ -67,6 +69,15 @@ function switchTab(tabName) {
     if (tabName === "results") {
         renderResultsTable();
     }
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function showToast(message, type = "info") {
@@ -233,7 +244,11 @@ function populateScanShooterDropdown() {
         const h1Status = s.half1_recorded ? `A:${s.half1_sum}` : "A:offen";
         const h2Status = s.half2_recorded ? `B:${s.half2_sum}` : "B:offen";
         const clubStr = s.club ? ` · ${s.club}` : "";
-        opt.textContent = `${s.last_name}, ${s.first_name} (${s.class_name}${clubStr}) [${h1Status} | ${h2Status}]`;
+        const grpParts = [];
+        if (s.group_name) grpParts.push(`Gr. ${s.group_name}`);
+        if (s.stand_number) grpParts.push(`St. ${s.stand_number}`);
+        const grpStr = grpParts.length ? ` · ${grpParts.join("/")}` : "";
+        opt.textContent = `${s.last_name}, ${s.first_name} (${s.class_name}${clubStr}${grpStr}) [${h1Status} | ${h2Status}]`;
         select.appendChild(opt);
     });
 
@@ -247,7 +262,81 @@ function populateScanShooterDropdown() {
     selectShooterForScan(state.selectedShooterId);
 }
 
-function selectShooterForScan(shooterId) {
+function selectScanMode(mode) {
+    state.scanMode = mode === "manual" ? "manual" : "qr";
+    const btnQr = document.getElementById("btnScanModeQr");
+    const btnManual = document.getElementById("btnScanModeManual");
+    const hintBox = document.getElementById("qrModeInfoHint");
+    const selectLabel = document.getElementById("scanShooterSelectLabel");
+
+    if (btnQr) btnQr.classList.toggle("active", state.scanMode === "qr");
+    if (btnManual) btnManual.classList.toggle("active", state.scanMode === "manual");
+    if (hintBox) hintBox.classList.toggle("hidden", state.scanMode !== "qr");
+    if (selectLabel) {
+        selectLabel.textContent =
+            state.scanMode === "qr"
+                ? "Schütze (wird bei QR-Scan automatisch gesetzt)"
+                : "Schütze auswählen *";
+    }
+}
+
+function renderQrDetectedBanner(qrData, matchedShooter) {
+    const banner = document.getElementById("qrDetectedBanner");
+    const grid = document.getElementById("qrDetectedFieldsGrid");
+    const halfBadge = document.getElementById("qrDetectedHalfBadge");
+    if (!banner || !grid) return;
+
+    if (!qrData) {
+        banner.classList.add("hidden");
+        grid.innerHTML = "";
+        return;
+    }
+
+    const halfNum = qrData.half === 2 ? 2 : 1;
+    if (halfBadge) {
+        halfBadge.textContent =
+            halfNum === 1 ? "1. Hälfte · Zettel A (Passe 1–5)" : "2. Hälfte · Zettel B (Passe 6–10)";
+    }
+
+    const fields = [
+        { label: "Wettbewerb", value: qrData.wettbewerb || "–" },
+        { label: "Name, Vorname", value: qrData.name || "–" },
+        { label: "Verein", value: qrData.verein || "–" },
+        { label: "Datum", value: qrData.datum || "–" },
+        { label: "Klasse", value: qrData.klasse || "–" },
+        { label: "Entfernung", value: qrData.entfernung || "–" },
+        { label: "Gruppe", value: qrData.gruppe || "–" },
+        { label: "Standnummer", value: qrData.standnummer || "–" },
+    ];
+
+    let itemsHtml = fields
+        .map(
+            (f) => `
+            <div class="qr-field-item">
+                <span class="qr-field-label">${escapeHtml(f.label)}:</span>
+                <strong class="qr-field-val">${escapeHtml(String(f.value))}</strong>
+            </div>
+        `
+        )
+        .join("");
+
+    if (matchedShooter) {
+        const statusNote = matchedShooter.auto_created
+            ? "Neu aus QR-Code im Wettkampf angelegt ✓"
+            : "Schütze im Wettkampf zugeordnet ✓";
+        itemsHtml += `
+            <div class="qr-field-item qr-field-match">
+                <span class="qr-field-label">Zuordnung:</span>
+                <strong class="qr-field-val">${escapeHtml(statusNote)}</strong>
+            </div>
+        `;
+    }
+
+    grid.innerHTML = itemsHtml;
+    banner.classList.remove("hidden");
+}
+
+function selectShooterForScan(shooterId, preserveEvaluatedGrid = false) {
     state.selectedShooterId = shooterId;
     const banner = document.getElementById("selectedShooterBanner");
     const shooter = state.shooters.find((s) => s.id === shooterId);
@@ -259,7 +348,11 @@ function selectShooterForScan(shooterId) {
 
     banner.classList.remove("hidden");
     document.getElementById("bannerShooterName").textContent = `${shooter.last_name}, ${shooter.first_name}`;
-    document.getElementById("bannerShooterMeta").textContent = `${shooter.class_name}${shooter.club ? " · " + shooter.club : ""}`;
+    const metaParts = [shooter.class_name];
+    if (shooter.club) metaParts.push(shooter.club);
+    if (shooter.group_name) metaParts.push(`Gruppe: ${shooter.group_name}`);
+    if (shooter.stand_number) metaParts.push(`Stand: ${shooter.stand_number}`);
+    document.getElementById("bannerShooterMeta").textContent = metaParts.join(" · ");
 
     const b1 = document.getElementById("badgeHalf1");
     const b2 = document.getElementById("badgeHalf2");
@@ -280,11 +373,13 @@ function selectShooterForScan(shooterId) {
         b2.className = "status-pill";
     }
 
-    // Load existing scores for this shooter & half if already recorded
-    loadExistingScoresIfPresent(shooter, state.selectedHalf);
+    if (!preserveEvaluatedGrid) {
+        // Load existing scores for this shooter & half if already recorded
+        loadExistingScoresIfPresent(shooter, state.selectedHalf);
+    }
 }
 
-function selectScanHalf(half) {
+function setHalfUiButtonsAndOverlay(half) {
     state.selectedHalf = half;
     document.getElementById("btnSelectHalf1").classList.toggle("active", half === 1);
     document.getElementById("btnSelectHalf2").classList.toggle("active", half === 2);
@@ -295,6 +390,10 @@ function selectScanHalf(half) {
         const lbl = document.getElementById(`ovLabelP${i}`);
         if (lbl) lbl.textContent = `Passe ${startP + i - 1}`;
     }
+}
+
+function selectScanHalf(half) {
+    setHalfUiButtonsAndOverlay(half);
 
     const shooter = state.shooters.find((s) => s.id === state.selectedShooterId);
     if (shooter) {
@@ -372,8 +471,8 @@ async function handleFileSelected(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    if (!state.selectedShooterId) {
-        showToast("Bitte zuerst einen Schützen auswählen.", "error");
+    if (state.scanMode === "manual" && !state.selectedShooterId) {
+        showToast("Bitte zuerst einen Schützen auswählen (oder 'Automatisch über QR-Code erkennen' nutzen).", "error");
         event.target.value = "";
         return;
     }
@@ -390,6 +489,10 @@ async function handleFileSelected(event) {
     const formData = new FormData();
     formData.append("photo", file);
     formData.append("half", String(state.selectedHalf));
+    if (state.activeCompetitionId) {
+        formData.append("competition_id", String(state.activeCompetitionId));
+    }
+    formData.append("auto_create_shooter", state.scanMode === "qr" ? "1" : "0");
 
     await sendPhotoForEvaluation(formData);
     event.target.value = "";
@@ -496,7 +599,7 @@ async function captureLiveFrame() {
 }
 
 async function runDemoScorecardScan() {
-    if (!state.selectedShooterId) {
+    if (state.scanMode === "manual" && !state.selectedShooterId) {
         showToast("Bitte zuerst einen Schützen auswählen oder anlegen.", "error");
         return;
     }
@@ -508,9 +611,18 @@ async function runDemoScorecardScan() {
         name: shooter ? `${shooter.last_name}, ${shooter.first_name}` : "Mustermann, Max",
         club: shooter ? shooter.club : "SV Pfeilflug",
         class_name: shooter ? shooter.class_name : "Herren",
+        group_name: shooter && shooter.group_name ? shooter.group_name : "Gruppe 1",
+        stand_number: shooter && shooter.stand_number ? shooter.stand_number : "4",
+        date: comp ? comp.date : "31.10.2026",
         competition: comp ? comp.name : "Vereinsmeisterschaft",
         format: "json",
     });
+    if (shooter) {
+        params.set("shooter_id", String(shooter.id));
+    }
+    if (comp) {
+        params.set("competition_id", String(comp.id));
+    }
 
     const loadingBox = document.getElementById("scanLoadingState");
     loadingBox.classList.remove("hidden");
@@ -520,7 +632,7 @@ async function runDemoScorecardScan() {
         const demoData = await demoRes.json();
         showPhotoInsideViewfinder(demoData.image_base64);
         await sendBase64ForEvaluation(demoData.image_base64);
-        showToast("Test-Ergebniszettel im Zielrahmen geladen und automatisch ausgewertet!", "success");
+        showToast("Test-Ergebniszettel (inkl. QR-Code) im Zielrahmen geladen und ausgewertet!", "success");
     } catch (err) {
         loadingBox.classList.add("hidden");
         showToast("Fehler beim Erzeugen des Test-Zettels.", "error");
@@ -543,7 +655,7 @@ async function sendPhotoForEvaluation(formData) {
             showToast(data.error || "Fehler bei der Auswertung.", "error");
             return;
         }
-        applyEvaluationResult(data);
+        await applyEvaluationResult(data);
     } catch (err) {
         loadingBox.classList.add("hidden");
         showToast("Netzwerkfehler bei der Bildauswertung.", "error");
@@ -560,6 +672,8 @@ async function sendBase64ForEvaluation(imageBase64) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 half: state.selectedHalf,
+                competition_id: state.activeCompetitionId,
+                auto_create_shooter: state.scanMode === "qr",
                 image_base64: imageBase64,
             }),
         });
@@ -570,14 +684,81 @@ async function sendBase64ForEvaluation(imageBase64) {
             showToast(data.error || "Fehler bei der Auswertung.", "error");
             return;
         }
-        applyEvaluationResult(data);
+        await applyEvaluationResult(data);
     } catch (err) {
         loadingBox.classList.add("hidden");
         showToast("Fehler bei der Bildauswertung.", "error");
     }
 }
 
-function applyEvaluationResult(data) {
+async function applyQrRecognition(data) {
+    const qr = data.qr_data;
+    if (!qr) {
+        renderQrDetectedBanner(null, null);
+        if (state.scanMode === "qr") {
+            showToast(
+                "Kein QR-Code erkannt – bitte Zettel vollständig (inkl. QR-Code oben rechts) fotografieren oder Schütze/Hälfte manuell prüfen.",
+                "error"
+            );
+        }
+        return;
+    }
+
+    // Half: the backend already evaluated the Passen with the half from the QR code
+    const qrHalf = Number(data.half || qr.half) === 2 ? 2 : 1;
+    setHalfUiButtonsAndOverlay(qrHalf);
+    const halfText = qrHalf === 1 ? "1. Hälfte (Zettel A)" : "2. Hälfte (Zettel B)";
+
+    const ms = data.matched_shooter;
+    if (ms && state.scanMode === "qr") {
+        // If the shooter was newly created or isn't known locally yet, reload competition data
+        const existsInState = state.shooters.some((s) => s.id === ms.id);
+        if (ms.auto_created || !existsInState) {
+            if (ms.competition_id && ms.competition_id !== state.activeCompetitionId) {
+                state.activeCompetitionId = ms.competition_id;
+                localStorage.setItem("bgscore_active_comp", String(ms.competition_id));
+            }
+            await loadCompetitions();
+        }
+
+        // Make sure the class filter doesn't hide the matched shooter
+        const classFilterEl = document.getElementById("scanClassFilter");
+        if (classFilterEl && classFilterEl.value && String(classFilterEl.value) !== String(ms.class_id)) {
+            classFilterEl.value = "";
+        }
+
+        state.selectedShooterId = ms.id;
+        populateScanShooterDropdown();
+        const selectEl = document.getElementById("scanShooterSelect");
+        if (selectEl) selectEl.value = String(ms.id);
+        selectShooterForScan(ms.id, true);
+
+        showToast(`QR-Code erkannt: ${ms.last_name}, ${ms.first_name} · ${halfText}`, "success");
+    } else if (ms && state.scanMode === "manual") {
+        if (state.selectedShooterId !== ms.id) {
+            showToast(
+                `Hinweis: QR-Code gehört zu ${ms.last_name}, ${ms.first_name} – manuell gewählter Schütze wurde beibehalten.`,
+                "info"
+            );
+        }
+    } else {
+        showToast(`QR-Code erkannt (${qr.name || "Zettel"} · ${halfText}), aber kein Schütze zugeordnet.`, "info");
+    }
+
+    renderQrDetectedBanner(qr, ms || null);
+}
+
+async function applyEvaluationResult(data) {
+    state.lastQrData = data.qr_data || null;
+
+    // 1. Handle QR-Code Automatic Recognition (Header fields, Half A/B, Shooter Matching)
+    try {
+        await applyQrRecognition(data);
+    } catch (err) {
+        console.error("QR-Zuordnung fehlgeschlagen:", err);
+    }
+
+    // 2. Populate evaluated 5 Passen
     state.evaluatedPasses = data.passes.map((p) => ({
         passe_number: p.passe_number,
         arrows: [...p.arrows],
@@ -597,7 +778,8 @@ function applyEvaluationResult(data) {
     // Confidence Badge
     const confBadge = document.getElementById("evalConfidenceBadge");
     const pct = Math.round((data.average_confidence || 0.9) * 100);
-    confBadge.textContent = `Erkennung: ${pct}% Sicherheit`;
+    const qrBadgeSuffix = data.qr_data ? " · QR ✓" : "";
+    confBadge.textContent = `Erkennung: ${pct}% Sicherheit${qrBadgeSuffix}`;
     confBadge.classList.remove("hidden");
 
     const modeMap = {
@@ -612,8 +794,9 @@ function applyEvaluationResult(data) {
         data.deskew_angle && Math.abs(data.deskew_angle) >= 0.4
             ? ` (Schräglage ${data.deskew_angle}° automatisch korrigiert)`
             : "";
+    const qrModeNote = data.qr_data ? " · QR-Code im Kopfbereich gelesen ✓" : "";
     document.getElementById("detectionModeLabel").textContent =
-        (modeMap[data.detection_mode] || data.detection_mode) + angleNote;
+        (modeMap[data.detection_mode] || data.detection_mode) + angleNote + qrModeNote;
 
     renderInteractivePassesEditor();
 
@@ -800,7 +983,7 @@ function renderResultsTable() {
     const filtered = state.shooters.filter((s) => {
         if (classFilterVal && String(s.class_id) !== String(classFilterVal)) return false;
         if (searchQuery) {
-            const hay = `${s.last_name} ${s.first_name} ${s.club} ${s.class_name}`.toLowerCase();
+            const hay = `${s.last_name} ${s.first_name} ${s.club} ${s.class_name} ${s.group_name || ""} ${s.stand_number || ""}`.toLowerCase();
             if (!hay.includes(searchQuery)) return false;
         }
         return true;
@@ -825,7 +1008,7 @@ function renderResultsTable() {
     if (filtered.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="19" class="text-center text-muted" style="padding: 28px;">
+                <td colspan="20" class="text-center text-muted" style="padding: 28px;">
                     Keine Schützen für diesen Filter gefunden.
                 </td>
             </tr>
@@ -840,6 +1023,7 @@ function renderResultsTable() {
 
         const p = s.passes || {};
         const fmtP = (n) => (p[n] !== null && p[n] !== undefined ? p[n] : "–");
+        const grpStandText = formatGroupStandText(s.group_name, s.stand_number);
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -847,6 +1031,7 @@ function renderResultsTable() {
             <td><strong>${escapeHtml(s.last_name)}, ${escapeHtml(s.first_name)}</strong></td>
             <td>${escapeHtml(s.club || "–")}</td>
             <td><span class="status-pill">${escapeHtml(s.class_name)}</span></td>
+            <td>${escapeHtml(grpStandText)}</td>
             <td class="num-col passe-col">${fmtP(1)}</td>
             <td class="num-col passe-col">${fmtP(2)}</td>
             <td class="num-col passe-col">${fmtP(3)}</td>
@@ -872,6 +1057,15 @@ function renderResultsTable() {
         `;
         tbody.appendChild(tr);
     });
+}
+
+function formatGroupStandText(groupName, standNumber) {
+    const g = (groupName || "").trim();
+    const st = (standNumber || "").trim();
+    if (g && st) return `${g} / St. ${st}`;
+    if (g) return g;
+    if (st) return `St. ${st}`;
+    return "–";
 }
 
 function jumpToShooterScan(shooterId, half) {
@@ -902,6 +1096,8 @@ async function handleShooterSubmit(event) {
         first_name: document.getElementById("shooterFirstName").value.trim(),
         club: document.getElementById("shooterClub").value.trim(),
         class_id: parseInt(document.getElementById("shooterClassSelect").value, 10),
+        group_name: document.getElementById("shooterGroup").value.trim(),
+        stand_number: document.getElementById("shooterStand").value.trim(),
     };
 
     try {
@@ -941,6 +1137,8 @@ function editShooter(shooterId) {
     document.getElementById("shooterFirstName").value = s.first_name;
     document.getElementById("shooterClub").value = s.club || "";
     document.getElementById("shooterClassSelect").value = s.class_id;
+    document.getElementById("shooterGroup").value = s.group_name || "";
+    document.getElementById("shooterStand").value = s.stand_number || "";
 
     document.getElementById("shooterFormTitle").textContent = "Schütze bearbeiten";
     document.getElementById("btnShooterSubmit").textContent = "Änderungen speichern";
@@ -952,6 +1150,8 @@ function resetShooterForm() {
     document.getElementById("shooterLastName").value = "";
     document.getElementById("shooterFirstName").value = "";
     document.getElementById("shooterClub").value = "";
+    document.getElementById("shooterGroup").value = "";
+    document.getElementById("shooterStand").value = "";
     document.getElementById("shooterFormTitle").textContent = "Schütze anlegen";
     document.getElementById("btnShooterSubmit").textContent = "+ Schütze speichern";
     document.getElementById("btnShooterCancelEdit").classList.add("hidden");
@@ -981,7 +1181,7 @@ function renderManageShootersTable() {
     list.sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, "de"));
 
     if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 20px;">Noch keine Schützen angelegt.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 20px;">Noch keine Schützen angelegt.</td></tr>`;
         return;
     }
 
@@ -993,13 +1193,16 @@ function renderManageShootersTable() {
         const h2Badge = s.half2_recorded
             ? `<span class="status-pill done">B: ${s.half2_sum}</span>`
             : `<span class="status-pill">B: –</span>`;
+        const grpStandText = formatGroupStandText(s.group_name, s.stand_number);
 
         tr.innerHTML = `
             <td><strong>${escapeHtml(s.last_name)}, ${escapeHtml(s.first_name)}</strong></td>
             <td>${escapeHtml(s.club || "–")}</td>
             <td>${escapeHtml(s.class_name)}</td>
+            <td>${escapeHtml(grpStandText)}</td>
             <td>${h1Badge} ${h2Badge}</td>
             <td>
+                <button type="button" class="btn btn-outline btn-sm" onclick="downloadShooterScorecardPdf(${s.id})" title="Vorbefüllten Schießzettel (PDF) für diesen Schützen herunterladen">📄 PDF</button>
                 <button type="button" class="btn btn-outline btn-sm" onclick="jumpToShooterScan(${s.id}, 1)">📸 Scannen</button>
                 <button type="button" class="btn btn-outline btn-sm" onclick="editShooter(${s.id})">✏️</button>
                 <button type="button" class="btn-danger-sm" onclick="deleteShooter(${s.id})">🗑️</button>
@@ -1029,6 +1232,8 @@ async function handleQuickShooterSubmit(event) {
         first_name: document.getElementById("quickFirstName").value.trim(),
         club: document.getElementById("quickClub").value.trim(),
         class_id: parseInt(document.getElementById("quickClassSelect").value, 10),
+        group_name: document.getElementById("quickGroup").value.trim(),
+        stand_number: document.getElementById("quickStand").value.trim(),
     };
 
     try {
@@ -1209,6 +1414,198 @@ async function openQrModal() {
 
 function closeQrModal() {
     document.getElementById("qrModal").classList.add("hidden");
+}
+
+// =========================================================================
+// Pre-filled Scorecard PDF Generator Modal (Gesamt, Klasse, Verein, Gruppe)
+// =========================================================================
+let currentPdfGroupMode = "all";
+let currentPdfGroupsData = {
+    total_shooters: 0,
+    by_class: [],
+    by_club: [],
+    by_group: [],
+};
+
+async function openScorecardPdfModal() {
+    if (!state.activeCompetitionId) {
+        showToast("Bitte zuerst einen Wettkampf auswählen.", "error");
+        return;
+    }
+    document.getElementById("scorecardPdfModal").classList.remove("hidden");
+    try {
+        const res = await fetch(`/api/competitions/${state.activeCompetitionId}/scorecards-groups`);
+        if (res.ok) {
+            currentPdfGroupsData = await res.json();
+        }
+    } catch (err) {
+        // Fallback to local state if needed
+    }
+    selectPdfGroupMode(currentPdfGroupMode);
+}
+
+function closeScorecardPdfModal() {
+    document.getElementById("scorecardPdfModal").classList.add("hidden");
+}
+
+function selectPdfGroupMode(mode) {
+    currentPdfGroupMode = mode;
+    ["all", "class", "club", "group"].forEach((m) => {
+        const btn = document.getElementById(`pdfModeBtn-${m}`);
+        if (btn) btn.classList.toggle("active", m === mode);
+    });
+    renderPdfPreviewList();
+}
+
+function _getPdfOptionsQuery() {
+    const half = document.getElementById("pdfHalfSelect") ? document.getElementById("pdfHalfSelect").value : "both";
+    const dist = document.getElementById("pdfDistanceSelect") ? document.getElementById("pdfDistanceSelect").value : "";
+    const params = new URLSearchParams({ half });
+    if (dist) params.set("distance", dist);
+    return params;
+}
+
+function renderPdfPreviewList() {
+    const container = document.getElementById("pdfPreviewListContainer");
+    const mainBtn = document.getElementById("btnDownloadAllPdfs");
+    const zipBtn = document.getElementById("btnDownloadZipPdfs");
+    if (!container || !mainBtn || !zipBtn) return;
+
+    container.innerHTML = "";
+    const totalShooters = currentPdfGroupsData.total_shooters || state.shooters.length;
+
+    if (totalShooters === 0) {
+        container.innerHTML = `
+            <div class="pdf-preview-empty">
+                Noch keine Schützen im aktiven Wettkampf angelegt. Du kannst trotzdem einen vorbefüllten Wettkampf-Zettel oder die Leer-Vorlage herunterladen.
+            </div>
+        `;
+        mainBtn.textContent = "📥 Wettkampf-Schießzettel (PDF) herunterladen";
+        zipBtn.classList.add("hidden");
+        return;
+    }
+
+    if (currentPdfGroupMode === "all") {
+        const item = document.createElement("div");
+        item.className = "pdf-preview-item";
+        item.innerHTML = `
+            <div>
+                <strong>Gesamt-PDF (Alle Schützen)</strong>
+                <span class="text-muted" style="font-size: 0.82rem; margin-left: 6px;">(${totalShooters} Schützen)</span>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="downloadSingleScorecardPdf('all', '')">
+                📄 PDF
+            </button>
+        `;
+        container.appendChild(item);
+        mainBtn.textContent = `📥 Gesamt-PDF für alle ${totalShooters} Schützen herunterladen`;
+        zipBtn.classList.add("hidden");
+        return;
+    }
+
+    let items = [];
+    let modeLabel = "Klasse";
+    let modePlural = "Klassen-PDFs";
+    if (currentPdfGroupMode === "class") {
+        items = currentPdfGroupsData.by_class || [];
+        modeLabel = "Klasse";
+        modePlural = "Klassen-PDFs";
+    } else if (currentPdfGroupMode === "club") {
+        items = currentPdfGroupsData.by_club || [];
+        modeLabel = "Verein";
+        modePlural = "Vereins-PDFs";
+    } else if (currentPdfGroupMode === "group") {
+        items = currentPdfGroupsData.by_group || [];
+        modeLabel = "Gruppe";
+        modePlural = "Gruppen-PDFs";
+    }
+
+    items.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "pdf-preview-item";
+        row.innerHTML = `
+            <div>
+                <strong>${escapeHtml(modeLabel)}: ${escapeHtml(entry.label)}</strong>
+                <span class="text-muted" style="font-size: 0.82rem; margin-left: 6px;">(${entry.count} Schützen)</span>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" data-pdf-key="${escapeHtml(entry.key)}">
+                📄 PDF herunterladen
+            </button>
+        `;
+        const btn = row.querySelector("button");
+        btn.onclick = () => downloadSingleScorecardPdf(currentPdfGroupMode, entry.key);
+        container.appendChild(row);
+    });
+
+    mainBtn.textContent = `📥 Alle ${items.length} ${modePlural} einzeln herunterladen (.pdf)`;
+    zipBtn.textContent = `📦 Alle ${items.length} ${modePlural} gebündelt als ZIP (.zip) herunterladen`;
+    zipBtn.classList.toggle("hidden", items.length <= 1);
+}
+
+function _triggerBrowserDownload(url) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 2000);
+}
+
+function downloadSingleScorecardPdf(mode, value) {
+    if (!state.activeCompetitionId) return;
+    const params = _getPdfOptionsQuery();
+    params.set("mode", mode);
+    if (value !== undefined && value !== null && value !== "") {
+        params.set("value", value);
+    }
+    const url = `/api/competitions/${state.activeCompetitionId}/scorecards.pdf?${params.toString()}`;
+    _triggerBrowserDownload(url);
+}
+
+function downloadShooterScorecardPdf(shooterId) {
+    if (!state.activeCompetitionId) return;
+    const params = new URLSearchParams({
+        mode: "shooter",
+        value: String(shooterId),
+        half: "both",
+    });
+    const url = `/api/competitions/${state.activeCompetitionId}/scorecards.pdf?${params.toString()}`;
+    _triggerBrowserDownload(url);
+}
+
+function triggerPrimaryPdfDownload() {
+    if (!state.activeCompetitionId) return;
+    if (currentPdfGroupMode === "all") {
+        downloadSingleScorecardPdf("all", "");
+        showToast("Gesamt-PDF mit vorbefüllten Schießzetteln wird heruntergeladen…", "success");
+        return;
+    }
+
+    let items = [];
+    if (currentPdfGroupMode === "class") items = currentPdfGroupsData.by_class || [];
+    else if (currentPdfGroupMode === "club") items = currentPdfGroupsData.by_club || [];
+    else if (currentPdfGroupMode === "group") items = currentPdfGroupsData.by_group || [];
+
+    if (items.length === 0) {
+        downloadSingleScorecardPdf("all", "");
+        return;
+    }
+
+    items.forEach((entry, idx) => {
+        setTimeout(() => {
+            downloadSingleScorecardPdf(currentPdfGroupMode, entry.key);
+        }, idx * 380);
+    });
+    showToast(`${items.length} PDF-Datei(en) werden erstellt und heruntergeladen…`, "success");
+}
+
+function downloadScorecardsZip() {
+    if (!state.activeCompetitionId) return;
+    const params = _getPdfOptionsQuery();
+    params.set("mode", currentPdfGroupMode);
+    const url = `/api/competitions/${state.activeCompetitionId}/scorecards.zip?${params.toString()}`;
+    _triggerBrowserDownload(url);
+    showToast("ZIP-Archiv mit allen PDFs wird heruntergeladen…", "success");
 }
 
 function escapeHtml(str) {

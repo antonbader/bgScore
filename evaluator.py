@@ -7,6 +7,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+import qr_codec
+
 # Ring values corresponding to the 6 scoring rows in each Passe table
 RING_VALUES = [10, 9, 8, 7, 6, 0]
 RING_LABELS = ["10", "9", "8", "7", "6", "0 (M)"]
@@ -814,10 +816,17 @@ def evaluate_scorecard_image(
     Evaluates a photographed Blasrohr-Ergebniszettel (Half 1 = Passe 1..5, Half 2 = Passe 6..10).
     1. Auto-deskews tilted photos
     2. Autonomously detects the 5 Passe boxes anywhere on the scorecard
-    3. Snaps internal 6x6 cells and detects crosses per column
+    3. Detects and decodes the QR code (containing all header fields + half) if present
+    4. Snaps internal 6x6 cells and detects crosses per column
     """
+    raw_img_hi = _load_and_normalize_image(image_bytes, max_dim=4200)
     raw_img = _load_and_normalize_image(image_bytes, max_dim=1600)
     img, deskew_angle = _auto_deskew_image(raw_img)
+    if abs(deskew_angle) >= 0.35:
+        img_hi = raw_img_hi.rotate(deskew_angle, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(240, 240, 240))
+    else:
+        img_hi = raw_img_hi
+
     rgb = np.array(img)
     h, w, _ = rgb.shape
     gray = (0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]).astype(np.float32)
@@ -829,6 +838,12 @@ def evaluate_scorecard_image(
     )
 
     passe_boxes, detection_mode = detect_passe_boxes(rgb, crop_region=crop_region)
+
+    # Attempt to decode QR code from high-res deskewed image (guided by passe_boxes geometry + fallback)
+    scale_hi = float(img_hi.size[0]) / float(max(1, w))
+    qr_data = qr_codec.decode_scorecard_qr_from_pil(img_hi, passe_boxes=passe_boxes, scale_from_eval_img=scale_hi)
+    if qr_data and qr_data.get("half") in (1, 2):
+        half = int(qr_data["half"])
 
     vis_img = img.copy()
     draw = ImageDraw.Draw(vis_img, "RGBA")
@@ -942,6 +957,7 @@ def evaluate_scorecard_image(
         "average_confidence": avg_conf,
         "detection_mode": detection_mode,
         "deskew_angle": deskew_angle,
+        "qr_data": qr_data,
         "annotated_image": annotated_b64,
         "passe_crops": passe_crops_b64,
         "detected_grid_region": {
@@ -960,14 +976,19 @@ def generate_test_scorecard_image(
     class_name: str = "Herren",
     competition_name: str = "Vereinsmeisterschaft",
     date_str: str = "31.10.2026",
+    group_name: str = "Gruppe 1",
+    stand_number: str = "4",
+    distance: str = "7 m",
+    shooter_id: Optional[int] = None,
+    competition_id: Optional[int] = None,
     preset_passes: Optional[List[List[int]]] = None,
 ) -> Tuple[bytes, List[List[int]]]:
     """
     Generates a high-resolution, millimeter-accurate image of the official
     'Blasrohr - Ergebniszettel' (Sheet A for half=1, Sheet B for half=2)
-    with realistic handwritten crosses ('X') in each Passe.
+    with a QR code in the top-right header and realistic handwritten crosses ('X') in each Passe.
     """
-    scale = 6.0
+    scale = 8.0
     W = int(round(210.0 * scale))
     H = int(round(297.0 * scale))
 
@@ -978,7 +999,7 @@ def generate_test_scorecard_image(
         font_title = ImageFont.truetype("arialbd.ttf", int(4.8 * scale))
         font_box_ab = ImageFont.truetype("arialbd.ttf", int(5.2 * scale))
         font_label = ImageFont.truetype("arialbd.ttf", int(2.7 * scale))
-        font_hand = ImageFont.truetype("segoepr.ttf", int(3.2 * scale))
+        font_hand = ImageFont.truetype("segoepr.ttf", int(2.9 * scale))
     except Exception:
         font_title = ImageFont.load_default()
         font_box_ab = ImageFont.load_default()
@@ -987,30 +1008,64 @@ def generate_test_scorecard_image(
 
     margin_l = int(round(17.5 * scale))
     margin_r = W - margin_l
-    draw.text((margin_l, int(13 * scale)), "Blasrohr - Ergebniszettel", fill=(0, 0, 0), font=font_title)
+    draw.text((margin_l, int(11.5 * scale)), "Blasrohr - Ergebniszettel", fill=(0, 0, 0), font=font_title)
 
     ab_letter = "A" if int(half) == 1 else "B"
-    bx0, by0, bx1, by1 = int(181 * scale), int(10 * scale), int(192.5 * scale), int(21.5 * scale)
+    bx0, by0, bx1, by1 = int(151.0 * scale), int(10 * scale), int(162.0 * scale), int(18.8 * scale)
     draw.rectangle([bx0, by0, bx1, by1], outline=(0, 0, 0), width=2)
-    draw.text((bx0 + int(3.5 * scale), by0 + int(2.5 * scale)), ab_letter, fill=(0, 0, 0), font=font_box_ab)
+    draw.text((bx0 + int(3.5 * scale), by0 + int(1.6 * scale)), ab_letter, fill=(0, 0, 0), font=font_box_ab)
 
-    fields_left = [("Wettbewerb", competition_name, 26), ("Name, Vorname", shooter_name, 33.5), ("Verein", club, 41)]
+    # Render QR code in top-right header (165.0 .. 193.5 mm, y = 15.2 .. 43.7 mm)
+    is_5m = "5" in (distance or "") or "5 m" in (class_name or "").lower() or "5m" in (class_name or "").lower()
+    resolved_dist = "5 m" if is_5m else "7 m"
+    qr_payload = qr_codec.encode_scorecard_qr_payload(
+        half=half,
+        competition_name=competition_name,
+        shooter_name=shooter_name,
+        club=club,
+        date_str=date_str,
+        class_name=class_name,
+        distance=resolved_dist,
+        group_name=group_name,
+        stand_number=stand_number,
+        shooter_id=shooter_id,
+        competition_id=competition_id,
+    )
+    qr_pil = qr_codec.make_scorecard_qr_image(qr_payload, box_size=6, border=2)
+    qr_px_sz = int(round(28.5 * scale))
+    qr_pil_resized = qr_pil.resize((qr_px_sz, qr_px_sz), Image.Resampling.NEAREST)
+    img.paste(qr_pil_resized, (int(round(165.0 * scale)), int(round(15.2 * scale))))
+
+    fields_left = [
+        ("Wettbewerb", competition_name, 21.0),
+        ("Name, Vorname", shooter_name, 26.8),
+        ("Verein", club, 32.6),
+        ("Gruppe", group_name, 38.4),
+    ]
     for lbl, val, ym in fields_left:
         y_px = int(ym * scale)
         draw.text((margin_l, y_px), lbl, fill=(0, 0, 0), font=font_label)
-        draw.line([(int(45 * scale), y_px + int(3.8 * scale)), (int(100 * scale), y_px + int(3.8 * scale))], fill=(0, 0, 0), width=1)
-        draw.text((int(46 * scale), y_px - int(0.5 * scale)), val, fill=(25, 50, 130), font=font_hand)
-
-    fields_right = [("Datum", date_str, 26), ("Klasse", class_name, 33.5), ("Entfernung    7 m [x]    5 m [ ]", "", 41)]
-    for lbl, val, ym in fields_right:
-        y_px = int(ym * scale)
-        draw.text((int(106 * scale), y_px), lbl, fill=(0, 0, 0), font=font_label)
+        draw.line([(int(45.0 * scale), y_px + int(3.8 * scale)), (int(96.5 * scale), y_px + int(3.8 * scale))], fill=(0, 0, 0), width=1)
         if val:
-            draw.line([(int(127 * scale), y_px + int(3.8 * scale)), (margin_r, y_px + int(3.8 * scale))], fill=(0, 0, 0), width=1)
-            draw.text((int(128 * scale), y_px - int(0.5 * scale)), val, fill=(25, 50, 130), font=font_hand)
+            draw.text((int(46.0 * scale), y_px - int(0.4 * scale)), str(val), fill=(25, 50, 130), font=font_hand)
 
-    draw.text((int(76 * scale), int(49 * scale)), "Bitte den Ergebniszettel leserlich ausfüllen.", fill=(30, 30, 30), font=font_label)
-    draw.text((int(61 * scale), int(53.5 * scale)), "Bei jedem Schuss einer Passe pro Spalte bitte genau ein Kreuz.", fill=(0, 0, 0), font=font_label)
+    entf_label = "Entfernung   7 m [ ]  5 m [x]" if is_5m else "Entfernung   7 m [x]  5 m [ ]"
+    fields_right = [
+        ("Datum", date_str, 21.0, True),
+        ("Klasse", class_name, 26.8, True),
+        (entf_label, "", 32.6, False),
+        ("Standnummer", stand_number, 38.4, True),
+    ]
+    for lbl, val, ym, has_line in fields_right:
+        y_px = int(ym * scale)
+        draw.text((int(100.5 * scale), y_px), lbl, fill=(0, 0, 0), font=font_label)
+        if has_line:
+            draw.line([(int(124.5 * scale), y_px + int(3.8 * scale)), (int(162.0 * scale), y_px + int(3.8 * scale))], fill=(0, 0, 0), width=1)
+            if val:
+                draw.text((int(125.5 * scale), y_px - int(0.4 * scale)), str(val), fill=(25, 50, 130), font=font_hand)
+
+    draw.text((int(76 * scale), int(46.0 * scale)), "Bitte den Ergebniszettel leserlich ausfüllen.", fill=(30, 30, 30), font=font_label)
+    draw.text((int(61 * scale), int(50.5 * scale)), "Bei jedem Schuss einer Passe pro Spalte bitte genau ein Kreuz.", fill=(0, 0, 0), font=font_label)
 
     if preset_passes is None:
         weights = [0.38, 0.30, 0.16, 0.09, 0.05, 0.02]

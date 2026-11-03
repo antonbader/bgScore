@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>bgScore – Blasrohr Schießzettel-Auswertung</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}">
 </head>
 <body>
     <!-- Top App Header -->
@@ -32,9 +32,9 @@
                 <button type="button" class="btn btn-ghost btn-sm" id="btnShowQrModal" title="Mit Handy verbinden (QR-Code)">
                     📱 <span class="hide-xs">Handy-Link</span>
                 </button>
-                <a href="/api/template-pdf" class="btn btn-ghost btn-sm" title="Offiziellen Ergebniszettel (A & B) als PDF herunterladen">
-                    📄 <span class="hide-xs">Zettel-PDF</span>
-                </a>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="openScorecardPdfModal()" title="Vorbefüllte Schießzettel oder Leer-Vorlage als PDF generieren">
+                    📄 <span class="hide-xs">Schießzettel-PDF</span>
+                </button>
             </div>
         </div>
 
@@ -74,6 +74,40 @@
                         </button>
                     </div>
 
+                    <!-- Recognition Mode Toggle: QR Auto-Detect vs Manual Selection -->
+                    <div class="form-group">
+                        <label>Zuordnung des Ergebniszettels</label>
+                        <div class="scan-mode-selector">
+                            <button type="button" id="btnScanModeQr" class="scan-mode-btn active" onclick="selectScanMode('qr')">
+                                <span class="scan-mode-icon">🏁</span>
+                                <div class="scan-mode-text">
+                                    <strong>Automatisch über QR-Code erkennen</strong>
+                                    <small>Schütze, Kopffelder &amp; Hälfte (A/B) automatisch aus QR-Code lesen</small>
+                                </div>
+                            </button>
+                            <button type="button" id="btnScanModeManual" class="scan-mode-btn" onclick="selectScanMode('manual')">
+                                <span class="scan-mode-icon">🎯</span>
+                                <div class="scan-mode-text">
+                                    <strong>Schütze manuell auswählen</strong>
+                                    <small>Für Zettel ohne QR-Code oder gezielte Auswahl</small>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="qrModeInfoHint" class="qr-mode-hint">
+                        <span>📷 <strong>QR-Automatik aktiv:</strong> Du kannst direkt ein Foto aufnehmen oder hochladen – der QR-Code oben rechts auf dem ausgefüllten Ergebniszettel erkennt automatisch <em>Wettbewerb, Name, Verein, Datum, Klasse, Entfernung, Gruppe, Standnummer</em> sowie die <em>1. oder 2. Hälfte</em> und wählt den Schützen passend aus (oder legt ihn an). Alternativ kannst du unten auch manuell wählen.</span>
+                    </div>
+
+                    <!-- Detected QR-Code Metadata Banner (shown after scanning a scorecard with QR code) -->
+                    <div id="qrDetectedBanner" class="qr-detected-banner hidden">
+                        <div class="qr-detected-header">
+                            <span class="qr-badge-pill">✓ QR-Code automatisch erkannt</span>
+                            <span id="qrDetectedHalfBadge" class="qr-half-pill">1. Hälfte (Zettel A)</span>
+                        </div>
+                        <div class="qr-detected-grid" id="qrDetectedFieldsGrid"></div>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="scanClassFilter">Klassen-Filter (optional)</label>
@@ -82,7 +116,7 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="scanShooterSelect">Schütze auswählen *</label>
+                            <label for="scanShooterSelect" id="scanShooterSelectLabel">Schütze (wird bei QR-Scan automatisch gesetzt)</label>
                             <select id="scanShooterSelect" class="form-control"></select>
                         </div>
                     </div>
@@ -371,11 +405,14 @@
                         </div>
                         <div class="form-group inline-group">
                             <label for="resultsSearchInput">Suche:</label>
-                            <input type="search" id="resultsSearchInput" class="form-control" placeholder="Name, Vorname, Verein…" oninput="renderResultsTable()">
+                            <input type="search" id="resultsSearchInput" class="form-control" placeholder="Name, Verein, Gruppe, Stand…" oninput="renderResultsTable()">
                         </div>
                     </div>
 
                     <div class="toolbar-exports">
+                        <button type="button" class="btn btn-outline" onclick="openScorecardPdfModal()">
+                            📄 Schießzettel-PDFs
+                        </button>
                         <button type="button" class="btn btn-primary" onclick="exportResults('csv')">
                             📥 Excel-CSV exportieren (.csv)
                         </button>
@@ -397,6 +434,7 @@
                                 <th>Name, Vorname</th>
                                 <th>Verein</th>
                                 <th>Klasse</th>
+                                <th title="Gruppe und Standnummer">Gruppe / Stand</th>
                                 <th class="num-col passe-col">P1</th>
                                 <th class="num-col passe-col">P2</th>
                                 <th class="num-col passe-col">P3</th>
@@ -448,6 +486,16 @@
                             <label for="shooterClassSelect">Klasse zuordnen *</label>
                             <select id="shooterClassSelect" class="form-control" required></select>
                         </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="shooterGroup">Gruppe (optional)</label>
+                                <input type="text" id="shooterGroup" class="form-control" placeholder="z. B. Gruppe 1">
+                            </div>
+                            <div class="form-group">
+                                <label for="shooterStand">Standnummer (optional)</label>
+                                <input type="text" id="shooterStand" class="form-control" placeholder="z. B. 4">
+                            </div>
+                        </div>
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary" id="btnShooterSubmit">
                                 + Schütze speichern
@@ -461,10 +509,13 @@
 
                 <!-- Shooter List -->
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header" style="flex-wrap: wrap;">
                         <h2>Angelegte Schützen</h2>
-                        <div class="header-inline-filter">
-                            <select id="manageShootersClassFilter" class="form-control form-control-sm" onchange="renderManageShootersTable()">
+                        <div class="header-inline-filter" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="openScorecardPdfModal()">
+                                📄 Vorbefüllte Schießzettel (PDF)
+                            </button>
+                            <select id="manageShootersClassFilter" class="form-control form-control-sm" style="width: auto;" onchange="renderManageShootersTable()">
                                 <option value="">Alle Klassen</option>
                             </select>
                         </div>
@@ -476,6 +527,7 @@
                                     <th>Name, Vorname</th>
                                     <th>Verein</th>
                                     <th>Klasse</th>
+                                    <th>Gruppe / Stand</th>
                                     <th>Status (A / B)</th>
                                     <th class="action-col">Aktionen</th>
                                 </tr>
@@ -604,11 +656,100 @@
                     <label for="quickClassSelect">Klasse *</label>
                     <select id="quickClassSelect" class="form-control" required></select>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="quickGroup">Gruppe (optional)</label>
+                        <input type="text" id="quickGroup" class="form-control" placeholder="z. B. Gruppe 1">
+                    </div>
+                    <div class="form-group">
+                        <label for="quickStand">Standnummer (optional)</label>
+                        <input type="text" id="quickStand" class="form-control" placeholder="z. B. 4">
+                    </div>
+                </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-ghost" onclick="closeQuickShooterModal()">Abbrechen</button>
                     <button type="submit" class="btn btn-primary">Anlegen &amp; auswählen</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Pre-filled Scorecard PDF Generator Modal -->
+    <div id="scorecardPdfModal" class="modal-backdrop hidden">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-header">
+                <h3>📄 Vorbefüllte Schießzettel (PDF) generieren</h3>
+                <button type="button" class="modal-close" onclick="closeScorecardPdfModal()">✕</button>
+            </div>
+            <p class="helper-text">
+                Erstellt druckfertige Schießzettel, in denen die Felder <strong>Wettbewerb, Name, Vorname, Verein, Datum, Klasse, Entfernung, Gruppe</strong> und <strong>Standnummer</strong> oben bereits vorbefüllt sind – inklusive <strong>QR-Code</strong> (mit allen Kopffeldern &amp; Zettel-Hälfte A/B) zur vollautomatischen Erkennung bei der Foto-Auswertung.
+            </p>
+
+            <!-- 1. Mode Selection: Gesamt, Pro Klasse, Pro Verein, Pro Gruppe -->
+            <div class="form-group">
+                <label>1. Wie sollen die PDFs erstellt werden?</label>
+                <div class="pdf-mode-grid">
+                    <button type="button" class="pdf-mode-btn active" id="pdfModeBtn-all" onclick="selectPdfGroupMode('all')">
+                        <strong>📚 Gesamt</strong>
+                        <small>1 PDF mit allen Schützen</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfModeBtn-class" onclick="selectPdfGroupMode('class')">
+                        <strong>🏷️ Pro Klasse</strong>
+                        <small>Je 1 PDF pro Klasse</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfModeBtn-club" onclick="selectPdfGroupMode('club')">
+                        <strong>🛡️ Pro Verein</strong>
+                        <small>Je 1 PDF pro Verein</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfModeBtn-group" onclick="selectPdfGroupMode('group')">
+                        <strong>👥 Pro Gruppe</strong>
+                        <small>Je 1 PDF pro Gruppe</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2. Half & Distance Options -->
+            <div class="form-row mt-2">
+                <div class="form-group">
+                    <label for="pdfHalfSelect">Zettel-Hälften</label>
+                    <select id="pdfHalfSelect" class="form-control">
+                        <option value="both">Beide Hälften (Zettel A + B)</option>
+                        <option value="1">Nur 1. Hälfte (Zettel A · Passe 1–5)</option>
+                        <option value="2">Nur 2. Hälfte (Zettel B · Passe 6–10)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="pdfDistanceSelect">Entfernung auf Zettel</label>
+                    <select id="pdfDistanceSelect" class="form-control">
+                        <option value="">Automatisch (7 m / 5 m je nach Klasse)</option>
+                        <option value="7 m">Alle auf 7 m vorbefüllen</option>
+                        <option value="5 m">Alle auf 5 m vorbefüllen</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 3. Preview List of Resulting PDFs -->
+            <div class="form-group mt-2">
+                <label id="pdfPreviewListTitle">Zu erstellende PDF-Dateien:</label>
+                <div id="pdfPreviewListContainer" class="pdf-preview-list"></div>
+            </div>
+
+            <!-- 4. Primary Action Buttons -->
+            <div class="pdf-modal-actions" id="pdfModalMainActions">
+                <button type="button" class="btn btn-primary btn-block" id="btnDownloadAllPdfs" onclick="triggerPrimaryPdfDownload()">
+                    📥 Gesamt-PDF herunterladen
+                </button>
+                <button type="button" class="btn btn-outline btn-block hidden" id="btnDownloadZipPdfs" onclick="downloadScorecardsZip()">
+                    📦 Alle PDFs gebündelt als ZIP-Archiv (.zip) herunterladen
+                </button>
+            </div>
+
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 14px;">
+                <a href="/api/template-pdf" class="btn btn-outline btn-sm" title="Leeren Ergebniszettel ohne Vorbefüllung herunterladen">
+                    📄 Leere Vorlage (ohne Namen)
+                </a>
+                <button type="button" class="btn btn-ghost" onclick="closeScorecardPdfModal()">Schließen</button>
+            </div>
         </div>
     </div>
 
@@ -633,6 +774,6 @@
     <!-- Toast Notification Container -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v={{ asset_version }}"></script>
 </body>
 </html>
