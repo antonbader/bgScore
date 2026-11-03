@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>bgScore – Blasrohr Schießzettel-Auswertung</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Top App Header -->
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="brand" onclick="switchTab('scan')">
+                <div class="target-logo" aria-hidden="true">
+                    <span class="ring-blue">
+                        <span class="ring-red">
+                            <span class="ring-yellow"></span>
+                        </span>
+                    </span>
+                </div>
+                <div>
+                    <h1 class="brand-title">bgScore</h1>
+                    <span class="brand-subtitle">Blasrohr-Schießzettel Auswertung</span>
+                </div>
+            </div>
+
+            <div class="header-controls">
+                <div class="comp-selector-wrap">
+                    <label for="activeCompetitionSelect" class="sr-only">Wettkampf</label>
+                    <select id="activeCompetitionSelect" class="comp-select" title="Aktiven Wettkampf wechseln"></select>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnShowQrModal" title="Mit Handy verbinden (QR-Code)">
+                    📱 <span class="hide-xs">Handy-Link</span>
+                </button>
+                <a href="/api/template-pdf" class="btn btn-ghost btn-sm" title="Offiziellen Ergebniszettel (A & B) als PDF herunterladen">
+                    📄 <span class="hide-xs">Zettel-PDF</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Desktop Navigation Bar -->
+        <nav class="top-nav">
+            <div class="nav-inner">
+                <button type="button" class="nav-tab active" data-tab="scan" onclick="switchTab('scan')">
+                    📸 Zettel auswerten
+                </button>
+                <button type="button" class="nav-tab" data-tab="results" onclick="switchTab('results')">
+                    🏆 Ergebnisliste &amp; Export
+                </button>
+                <button type="button" class="nav-tab" data-tab="shooters" onclick="switchTab('shooters')">
+                    🎯 Schützen (<span id="navShooterCount">0</span>)
+                </button>
+                <button type="button" class="nav-tab" data-tab="competition" onclick="switchTab('competition')">
+                    ⚙️ Wettkampf &amp; Klassen
+                </button>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="main-container">
+
+        <!-- ================================================================
+             TAB 1: ZETTEL AUSWERTEN (KAMERA / SCAN)
+             ================================================================ -->
+        <section id="tab-scan" class="tab-panel active">
+            <div class="scan-grid">
+                <!-- Left / Top Card: Shooter & Half Selection + Camera Input -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>1. Schütze &amp; Hälfte wählen</h2>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="openQuickShooterModal()">
+                            + Neuer Schütze
+                        </button>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="scanClassFilter">Klassen-Filter (optional)</label>
+                            <select id="scanClassFilter" class="form-control">
+                                <option value="">Alle Klassen anzeigen</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="scanShooterSelect">Schütze auswählen *</label>
+                            <select id="scanShooterSelect" class="form-control"></select>
+                        </div>
+                    </div>
+
+                    <!-- Selected Shooter Status Info -->
+                    <div id="selectedShooterBanner" class="shooter-status-banner hidden">
+                        <div class="shooter-banner-info">
+                            <strong id="bannerShooterName">–</strong>
+                            <span id="bannerShooterMeta" class="text-muted">–</span>
+                        </div>
+                        <div class="shooter-banner-badges">
+                            <span id="badgeHalf1" class="status-pill">1. Hälfte (A): offen</span>
+                            <span id="badgeHalf2" class="status-pill">2. Hälfte (B): offen</span>
+                        </div>
+                    </div>
+
+                    <!-- Half Selector (1. Hälfte Zettel A vs 2. Hälfte Zettel B) -->
+                    <div class="form-group mt-3">
+                        <label>Welche Hälfte soll eingelesen werden?</label>
+                        <div class="half-selector">
+                            <button type="button" id="btnSelectHalf1" class="half-btn active" onclick="selectScanHalf(1)">
+                                <span class="half-letter">A</span>
+                                <div class="half-text">
+                                    <strong>1. Hälfte</strong>
+                                    <small>Zettel A · Passe 1 – 5</small>
+                                </div>
+                            </button>
+                            <button type="button" id="btnSelectHalf2" class="half-btn" onclick="selectScanHalf(2)">
+                                <span class="half-letter">B</span>
+                                <div class="half-text">
+                                    <strong>2. Hälfte</strong>
+                                    <small>Zettel B · Passe 6 – 10</small>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <hr class="divider">
+
+                    <!-- Camera / Photo Capture Controls with ALWAYS-VISIBLE 5-Passen Zielrahmen -->
+                    <div class="card-header compact">
+                        <h2>2. Ergebniszettel fotografieren</h2>
+                    </div>
+                    <p class="helper-text">
+                        Der <strong>Zielrahmen</strong> dient als Orientierungshilfe – die Software erkennt und begradigt die <strong>5 Passen-Kästen selbstständig</strong>, auch wenn der komplette Schießzettel (oder leicht schräg/versetzt) fotografiert wird.
+                    </p>
+
+                    <!-- Always-Visible Viewfinder with 5-Passen Target Frame (Zielrahmen) -->
+                    <div id="liveCameraContainer" class="live-camera-box">
+                        <div class="video-wrapper" id="viewfinderWrapper">
+                            <!-- Live Camera Stream -->
+                            <video id="cameraVideo" autoplay playsinline muted class="hidden"></video>
+                            <!-- Captured / Uploaded Photo inside Viewfinder -->
+                            <img id="viewfinderPhotoPreview" src="" alt="Zettel im Zielrahmen" class="viewfinder-photo hidden">
+                            <!-- Placeholder background when neither live video nor photo is active yet -->
+                            <div id="viewfinderIdleBg" class="viewfinder-idle-bg">
+                                <div class="idle-hint-box">
+                                    <span>📷 Live-Kamera starten oder Foto aufnehmen</span>
+                                    <small>Die 5 Passen-Tabellen werden in diesen Zielrahmen eingepasst</small>
+                                </div>
+                            </div>
+
+                            <!-- High-Contrast 5-Passen Alignment Target Frame (Zielrahmen) -->
+                            <div class="camera-overlay" id="targetFrameOverlay">
+                                <div class="target-corner corner-tl"></div>
+                                <div class="target-corner corner-tr"></div>
+                                <div class="target-corner corner-bl"></div>
+                                <div class="target-corner corner-br"></div>
+
+                                <div class="overlay-title" id="overlayTopBanner">
+                                    🎯 Zielrahmen: 5 Passen hier ausrichten
+                                </div>
+
+                                <div class="overlay-passes-grid">
+                                    <div class="overlay-passe-box">
+                                        <div class="ov-ring-strip">
+                                            <span class="ov-r-y">10</span>
+                                            <span class="ov-r-y">9</span>
+                                            <span class="ov-r-r">8</span>
+                                            <span class="ov-r-r">7</span>
+                                            <span class="ov-r-b">6</span>
+                                            <span class="ov-r-w">0</span>
+                                        </div>
+                                        <div class="ov-passe-inner">
+                                            <span class="ov-passe-label" id="ovLabelP1">Passe 1</span>
+                                            <span class="ov-cols-hint">Pfeil 1 – 6</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlay-passe-box">
+                                        <div class="ov-ring-strip">
+                                            <span class="ov-r-y">10</span>
+                                            <span class="ov-r-y">9</span>
+                                            <span class="ov-r-r">8</span>
+                                            <span class="ov-r-r">7</span>
+                                            <span class="ov-r-b">6</span>
+                                            <span class="ov-r-w">0</span>
+                                        </div>
+                                        <div class="ov-passe-inner">
+                                            <span class="ov-passe-label" id="ovLabelP2">Passe 2</span>
+                                            <span class="ov-cols-hint">Pfeil 1 – 6</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlay-passe-box">
+                                        <div class="ov-ring-strip">
+                                            <span class="ov-r-y">10</span>
+                                            <span class="ov-r-y">9</span>
+                                            <span class="ov-r-r">8</span>
+                                            <span class="ov-r-r">7</span>
+                                            <span class="ov-r-b">6</span>
+                                            <span class="ov-r-w">0</span>
+                                        </div>
+                                        <div class="ov-passe-inner">
+                                            <span class="ov-passe-label" id="ovLabelP3">Passe 3</span>
+                                            <span class="ov-cols-hint">Pfeil 1 – 6</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlay-passe-box">
+                                        <div class="ov-ring-strip">
+                                            <span class="ov-r-y">10</span>
+                                            <span class="ov-r-y">9</span>
+                                            <span class="ov-r-r">8</span>
+                                            <span class="ov-r-r">7</span>
+                                            <span class="ov-r-b">6</span>
+                                            <span class="ov-r-w">0</span>
+                                        </div>
+                                        <div class="ov-passe-inner">
+                                            <span class="ov-passe-label" id="ovLabelP4">Passe 4</span>
+                                            <span class="ov-cols-hint">Pfeil 1 – 6</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlay-passe-box">
+                                        <div class="ov-ring-strip">
+                                            <span class="ov-r-y">10</span>
+                                            <span class="ov-r-y">9</span>
+                                            <span class="ov-r-r">8</span>
+                                            <span class="ov-r-r">7</span>
+                                            <span class="ov-r-b">6</span>
+                                            <span class="ov-r-w">0</span>
+                                        </div>
+                                        <div class="ov-passe-inner">
+                                            <span class="ov-passe-label" id="ovLabelP5">Passe 5</span>
+                                            <span class="ov-cols-hint">Pfeil 1 – 6</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlay-passe-sig">
+                                        <span>Unterschriftsfeld</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Controls when Live Camera is active -->
+                        <div id="liveStreamActiveBar" class="live-camera-controls hidden">
+                            <button type="button" class="btn btn-success btn-lg" onclick="captureLiveFrame()">
+                                📸 Jetzt im Zielrahmen auslösen
+                            </button>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="switchCameraFacing()" title="Kamera wechseln (Vorder-/Rückkamera)">
+                                🔄 Kamera
+                            </button>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="stopLiveCamera()">
+                                ⏹️ Stopp
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="camera-actions mt-3">
+                        <button type="button" class="btn btn-primary btn-lg btn-block camera-main-btn" id="btnOpenLiveCamera" onclick="startLiveCamera()">
+                            🎥 Live-Kamera mit Zielrahmen starten
+                        </button>
+
+                        <div class="camera-secondary-btns">
+                            <label for="nativeCameraInput" class="btn btn-outline">
+                                📷 System-Kamera / Foto
+                            </label>
+                            <input type="file" id="nativeCameraInput" accept="image/*" capture="environment" class="sr-only">
+
+                            <button type="button" class="btn btn-outline" id="btnUploadGallery" onclick="document.getElementById('galleryFileInput').click()">
+                                📁 Bilddatei wählen
+                            </button>
+                            <input type="file" id="galleryFileInput" accept="image/*" class="sr-only">
+
+                            <button type="button" class="btn btn-secondary" id="btnRunDemoScan" onclick="runDemoScorecardScan()">
+                                🧪 Test-Zettel im Zielrahmen testen
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Loading Spinner during CV Evaluation -->
+                    <div id="scanLoadingState" class="loading-box hidden">
+                        <div class="spinner"></div>
+                        <p><strong>Schießzettel wird automatisch ausgewertet…</strong><br>
+                        <small class="text-muted">Passen-Tabellen und Kreuze werden erkannt</small></p>
+                    </div>
+                </div>
+
+                <!-- Right / Bottom Card: Evaluation Result, Interactive Grid Verification & Save -->
+                <div class="card" id="evaluationResultCard">
+                    <div class="card-header">
+                        <h2>3. Auswertung &amp; Kontrolle</h2>
+                        <div id="evalConfidenceBadge" class="confidence-badge hidden"></div>
+                    </div>
+
+                    <!-- Empty state before photo is taken -->
+                    <div id="evalEmptyState" class="empty-state">
+                        <div class="empty-icon">🎯</div>
+                        <h3>Bereit zur Auswertung</h3>
+                        <p>Wähle links einen Schützen und die gewünschte Hälfte (Zettel A oder B) aus und mache ein Foto des Ergebniszettels – oder starte direkt die manuelle Eingabe.</p>
+                        <button type="button" class="btn btn-outline mt-2" onclick="initEmptyManualGrid()">
+                            ✏️ Kreuze manuell antippen (ohne Foto)
+                        </button>
+                    </div>
+
+                    <!-- Active Evaluation Content -->
+                    <div id="evalActiveContent" class="hidden">
+                        <!-- Summary Bar for the Half -->
+                        <div class="eval-summary-bar">
+                            <div>
+                                <span class="summary-label" id="evalSummaryTitle">Ergebnis 1. Hälfte (Passe 1–5)</span>
+                                <div class="summary-hint">Tipp: Du kannst jedes erkannte Kreuz unten in den Tabellen per Antippen korrigieren.</div>
+                            </div>
+                            <div class="summary-total-box">
+                                <span id="evalHalfTotalValue" class="summary-total-number">0</span>
+                                <span class="summary-total-max">/ 300 Ringe</span>
+                            </div>
+                        </div>
+
+                        <!-- Collapsible Annotated Photo Preview & Frame Adjuster -->
+                        <details id="photoPreviewDetails" class="photo-preview-details">
+                            <summary>
+                                <span>🔍 Erkanntes Foto &amp; Passen-Markierungen anzeigen / Rahmen anpassen</span>
+                            </summary>
+                            <div class="annotated-photo-wrap">
+                                <img id="annotatedPreviewImg" src="" alt="Ausgewerteter Schießzettel" class="annotated-img">
+                                <div class="photo-adjust-bar">
+                                    <span class="text-muted" id="detectionModeLabel">Automatische 5-Box-Erkennung</span>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- The 5 Interactive Passe Tables (Passe 1..5 or 6..10) -->
+                        <div id="interactivePassesContainer" class="passes-editor-grid"></div>
+
+                        <!-- Save Bar -->
+                        <div class="save-bar">
+                            <button type="button" id="btnSaveScores" class="btn btn-success btn-lg btn-block" onclick="saveEvaluatedScores()">
+                                💾 Ergebnis für Schütze speichern
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================
+             TAB 2: ERGEBNISLISTE & EXCEL/CSV EXPORT
+             ================================================================ -->
+        <section id="tab-results" class="tab-panel">
+            <!-- KPI Summary Row -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <span class="kpi-label">Schützen (Auswahl)</span>
+                    <strong class="kpi-value" id="kpiTotalShooters">0</strong>
+                </div>
+                <div class="kpi-card">
+                    <span class="kpi-label">1. Hälfte erfasst (A)</span>
+                    <strong class="kpi-value" id="kpiHalf1Done">0</strong>
+                </div>
+                <div class="kpi-card">
+                    <span class="kpi-label">2. Hälfte erfasst (B)</span>
+                    <strong class="kpi-value" id="kpiHalf2Done">0</strong>
+                </div>
+                <div class="kpi-card">
+                    <span class="kpi-label">Bestes Gesamtergebnis</span>
+                    <strong class="kpi-value highlight" id="kpiBestScore">–</strong>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="results-toolbar">
+                    <div class="toolbar-filters">
+                        <div class="form-group inline-group">
+                            <label for="resultsClassFilter">Klasse filtern:</label>
+                            <select id="resultsClassFilter" class="form-control" onchange="renderResultsTable()">
+                                <option value="">Alle Klassen</option>
+                            </select>
+                        </div>
+                        <div class="form-group inline-group">
+                            <label for="resultsSearchInput">Suche:</label>
+                            <input type="search" id="resultsSearchInput" class="form-control" placeholder="Name, Vorname, Verein…" oninput="renderResultsTable()">
+                        </div>
+                    </div>
+
+                    <div class="toolbar-exports">
+                        <button type="button" class="btn btn-primary" onclick="exportResults('csv')">
+                            📥 Excel-CSV exportieren (.csv)
+                        </button>
+                        <button type="button" class="btn btn-outline" onclick="exportResults('xlsx')">
+                            📊 Excel-Datei (.xlsx)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Class Filter Pills for quick 1-tap switching -->
+                <div id="classFilterPills" class="class-pills-bar"></div>
+
+                <!-- Results Table -->
+                <div class="table-responsive">
+                    <table class="results-table" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th title="Platzierung">Platz</th>
+                                <th>Name, Vorname</th>
+                                <th>Verein</th>
+                                <th>Klasse</th>
+                                <th class="num-col passe-col">P1</th>
+                                <th class="num-col passe-col">P2</th>
+                                <th class="num-col passe-col">P3</th>
+                                <th class="num-col passe-col">P4</th>
+                                <th class="num-col passe-col">P5</th>
+                                <th class="num-col half-col">1. Hälfte</th>
+                                <th class="num-col passe-col">P6</th>
+                                <th class="num-col passe-col">P7</th>
+                                <th class="num-col passe-col">P8</th>
+                                <th class="num-col passe-col">P9</th>
+                                <th class="num-col passe-col">P10</th>
+                                <th class="num-col half-col">2. Hälfte</th>
+                                <th class="num-col total-col">Gesamt</th>
+                                <th class="num-col tie-col" title="Anzahl 10er / 9er">10er/9er</th>
+                                <th class="action-col">Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================
+             TAB 3: SCHÜTZEN VERWALTEN
+             ================================================================ -->
+        <section id="tab-shooters" class="tab-panel">
+            <div class="two-col-layout">
+                <!-- Add / Edit Shooter Form -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 id="shooterFormTitle">Schütze anlegen</h2>
+                    </div>
+                    <form id="shooterForm" onsubmit="handleShooterSubmit(event)">
+                        <input type="hidden" id="editShooterId" value="">
+                        <div class="form-group">
+                            <label for="shooterLastName">Name (Nachname) *</label>
+                            <input type="text" id="shooterLastName" class="form-control" placeholder="z. B. Mustermann" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="shooterFirstName">Vorname *</label>
+                            <input type="text" id="shooterFirstName" class="form-control" placeholder="z. B. Max" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="shooterClub">Verein</label>
+                            <input type="text" id="shooterClub" class="form-control" placeholder="z. B. SV Grün-Weiß">
+                        </div>
+                        <div class="form-group">
+                            <label for="shooterClassSelect">Klasse zuordnen *</label>
+                            <select id="shooterClassSelect" class="form-control" required></select>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary" id="btnShooterSubmit">
+                                + Schütze speichern
+                            </button>
+                            <button type="button" class="btn btn-ghost hidden" id="btnShooterCancelEdit" onclick="resetShooterForm()">
+                                Abbrechen
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Shooter List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Angelegte Schützen</h2>
+                        <div class="header-inline-filter">
+                            <select id="manageShootersClassFilter" class="form-control form-control-sm" onchange="renderManageShootersTable()">
+                                <option value="">Alle Klassen</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Name, Vorname</th>
+                                    <th>Verein</th>
+                                    <th>Klasse</th>
+                                    <th>Status (A / B)</th>
+                                    <th class="action-col">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="manageShootersTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================
+             TAB 4: WETTKAMPF & KLASSEN VERWALTEN
+             ================================================================ -->
+        <section id="tab-competition" class="tab-panel">
+            <div class="two-col-layout">
+                <!-- Competition Management -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Wettkämpfe verwalten</h2>
+                    </div>
+
+                    <form id="competitionForm" onsubmit="handleCreateCompetition(event)" class="mb-4">
+                        <h3>Neuen Wettkampf anlegen</h3>
+                        <div class="form-group">
+                            <label for="compName">Name des Wettkampfs *</label>
+                            <input type="text" id="compName" class="form-control" placeholder="z. B. Vereinsmeisterschaft 2026" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="compDate">Datum</label>
+                                <input type="date" id="compDate" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="compLocation">Ort / Halle (optional)</label>
+                                <input type="text" id="compLocation" class="form-control" placeholder="z. B. Schützenhaus">
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="compDefaultClasses" checked>
+                                Standard-Klassen (Schüler III (5 m), Schüler II, Schüler I, Jugend, Damen, Herren, Senioren) direkt anlegen
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">+ Wettkampf erstellen</button>
+                    </form>
+
+                    <hr class="divider">
+                    <h3>Vorhandene Wettkämpfe</h3>
+                    <div id="competitionsListContainer" class="item-list"></div>
+                </div>
+
+                <!-- Classes Management for Active Competition -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Klassen des aktiven Wettkampfs</h2>
+                    </div>
+                    <p class="helper-text">
+                        Wettkampf: <strong id="activeCompLabelInClasses">–</strong>
+                    </p>
+
+                    <form id="classForm" onsubmit="handleCreateClass(event)" class="inline-add-form">
+                        <input type="text" id="newClassName" class="form-control" placeholder="Neue Klasse (z. B. Herren I, Senioren A…)" required>
+                        <button type="submit" class="btn btn-primary">+ Klasse hinzufügen</button>
+                    </form>
+
+                    <div class="quick-chips">
+                        <span class="chip-label">Schnell-Vorlagen:</span>
+                        <button type="button" class="chip" onclick="quickAddClass('Schüler III (5 m)')">+ Schüler III (5 m)</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Schüler II')">+ Schüler II</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Schüler I')">+ Schüler I</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Jugend')">+ Jugend</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Damen')">+ Damen</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Herren')">+ Herren</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Senioren')">+ Senioren</button>
+                        <button type="button" class="chip" onclick="quickAddClass('Handicap')">+ Handicap</button>
+                    </div>
+
+                    <div id="classesListContainer" class="item-list mt-3"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Mobile Bottom Navigation Bar -->
+    <nav class="mobile-bottom-nav">
+        <button type="button" class="mob-nav-btn active" data-tab="scan" onclick="switchTab('scan')">
+            <span class="mob-icon">📸</span>
+            <span>Auswerten</span>
+        </button>
+        <button type="button" class="mob-nav-btn" data-tab="results" onclick="switchTab('results')">
+            <span class="mob-icon">🏆</span>
+            <span>Ergebnisse</span>
+        </button>
+        <button type="button" class="mob-nav-btn" data-tab="shooters" onclick="switchTab('shooters')">
+            <span class="mob-icon">🎯</span>
+            <span>Schützen</span>
+        </button>
+        <button type="button" class="mob-nav-btn" data-tab="competition" onclick="switchTab('competition')">
+            <span class="mob-icon">⚙️</span>
+            <span>Wettkampf</span>
+        </button>
+    </nav>
+
+    <!-- Quick Add Shooter Modal (accessible directly from Scan screen) -->
+    <div id="quickShooterModal" class="modal-backdrop hidden">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>Schnell neuen Schützen anlegen</h3>
+                <button type="button" class="modal-close" onclick="closeQuickShooterModal()">✕</button>
+            </div>
+            <form id="quickShooterForm" onsubmit="handleQuickShooterSubmit(event)">
+                <div class="form-group">
+                    <label for="quickLastName">Name (Nachname) *</label>
+                    <input type="text" id="quickLastName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="quickFirstName">Vorname *</label>
+                    <input type="text" id="quickFirstName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="quickClub">Verein</label>
+                    <input type="text" id="quickClub" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="quickClassSelect">Klasse *</label>
+                    <select id="quickClassSelect" class="form-control" required></select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-ghost" onclick="closeQuickShooterModal()">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Anlegen &amp; auswählen</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- QR-Code / Smartphone LAN Connection Modal -->
+    <div id="qrModal" class="modal-backdrop hidden">
+        <div class="modal-dialog text-center">
+            <div class="modal-header">
+                <h3>📱 Mit dem Handy verbinden</h3>
+                <button type="button" class="modal-close" onclick="closeQrModal()">✕</button>
+            </div>
+            <p class="helper-text">
+                Scanne diesen QR-Code mit deinem Smartphone (im selben WLAN), um <strong>bgScore</strong> auf dem Handy zu öffnen und Schießzettel direkt per Handykamera abzufotografieren:
+            </p>
+            <div id="qrImageContainer" class="qr-box"></div>
+            <p class="lan-url-display"><code id="lanUrlText">http://127.0.0.1:5000</code></p>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary btn-block" onclick="closeQrModal()">Schließen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
