@@ -6,9 +6,16 @@ import os
 import re
 import socket
 import sqlite3
+import sys
 import zipfile
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+# Fallback für Streams bei PyInstaller --noconsole / Windowed Modus
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
 
 from flask import (
     Flask,
@@ -23,11 +30,38 @@ from flask import (
 import evaluator
 import scorecard_pdf
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "bgscore.db")
+# Ermittlung der Verzeichnisse:
+# - BUNDLE_DIR: Liefert im PyInstaller-Bundle (_MEIPASS) die statischen Assets (Templates, Static, Vorlagen).
+# - APP_DIR / BASE_DIR: Verzeichnis der ausführbaren .exe (oder Skriptpfad), in dem bgscore.db und eigene Zertifikate dauerhaft liegen.
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    APP_DIR = BUNDLE_DIR
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
+BASE_DIR = APP_DIR
+DB_PATH = os.path.join(APP_DIR, "bgscore.db")
+
+app = Flask(
+    __name__,
+    static_folder=os.path.join(BUNDLE_DIR, "static"),
+    template_folder=os.path.join(BUNDLE_DIR, "templates"),
+)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB upload limit for high-res phone photos
+
+
+def get_ssl_cert_paths() -> Tuple[Optional[str], Optional[str]]:
+    """Prüft, ob SSL-Zertifikate vorhanden sind (im Anwendungsverzeichnis oder im Bundle)."""
+    c_app = os.path.join(APP_DIR, "cert.pem")
+    k_app = os.path.join(APP_DIR, "key.pem")
+    if os.path.exists(c_app) and os.path.exists(k_app):
+        return c_app, k_app
+    c_bundle = os.path.join(BUNDLE_DIR, "cert.pem")
+    k_bundle = os.path.join(BUNDLE_DIR, "key.pem")
+    if os.path.exists(c_bundle) and os.path.exists(k_bundle):
+        return c_bundle, k_bundle
+    return None, None
 
 
 @app.context_processor
@@ -35,8 +69,8 @@ def inject_asset_version():
     """Cache-busting version for static JS/CSS (changes whenever the files are modified)."""
     try:
         mtimes = [
-            os.path.getmtime(os.path.join(BASE_DIR, "static", "js", "app.js")),
-            os.path.getmtime(os.path.join(BASE_DIR, "static", "css", "style.css")),
+            os.path.getmtime(os.path.join(BUNDLE_DIR, "static", "js", "app.js")),
+            os.path.getmtime(os.path.join(BUNDLE_DIR, "static", "css", "style.css")),
         ]
         version = str(int(max(mtimes)))
     except OSError:
@@ -335,7 +369,8 @@ def api_network_info():
     port = request.host.split(":")[-1] if ":" in request.host else "5000"
     url = f"http://{lan_ip}:5000"
     https_url = f"https://{lan_ip}:5443"
-    has_ssl = os.path.exists(os.path.join(BASE_DIR, "cert.pem")) and os.path.exists(os.path.join(BASE_DIR, "key.pem"))
+    cert_f, key_f = get_ssl_cert_paths()
+    has_ssl = cert_f is not None and key_f is not None
     preferred_mobile_url = https_url if has_ssl else url
 
     qr_b64 = None
@@ -1723,9 +1758,8 @@ def api_demo_scorecard():
 
 if __name__ == "__main__":
     init_db()
-    cert_file = os.path.join(BASE_DIR, "cert.pem")
-    key_file = os.path.join(BASE_DIR, "key.pem")
-    if os.path.exists(cert_file) and os.path.exists(key_file):
+    cert_file, key_file = get_ssl_cert_paths()
+    if cert_file and key_file:
         import threading
         from werkzeug.serving import make_server
 
@@ -1739,5 +1773,27 @@ if __name__ == "__main__":
 
         t = threading.Thread(target=_run_https, daemon=True)
         t.start()
+
+    # Browser nach kurzer Verzögerung automatisch im Standard-Webbrowser öffnen
+    import threading
+    import time
+    import webbrowser
+
+    def _open_browser():
+        time.sleep(1.0)
+        try:
+            webbrowser.open("http://localhost:5000")
+        except Exception as e:
+            print("Browser-Start Hinweis:", e)
+
+    threading.Thread(target=_open_browser, daemon=True).start()
+
+    print("========================================================")
+    print("  bgScore - Automatische Blasrohr-Schiesszettel Webapp")
+    print("========================================================")
+    print(" * Lokaler Server laeuft auf: http://localhost:5000")
+    print(" * Standard-Webbrowser wird geoeffnet...")
+    print(" * Schliessen Sie dieses Fenster zum Beenden der Software.")
+    print("========================================================")
 
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
