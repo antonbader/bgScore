@@ -39,9 +39,12 @@ Für eine detaillierte Schritt-für-Schritt-Anleitung mit vielen Praxistipps fü
   - Live-Aktualisierung alle 3 Sekunden – ideal für die Anzeige auf einem Großbildschirm oder Beamer im Schützenhaus.
   - Rangberechnung: Höchste Ringzahl, bei Gleichstand Auswertung der 10er und 9er.
   - Medaillen-Kennzeichnung (🥇 Gold, 🥈 Silber, 🥉 Bronze) und Schnellfilter nach Klassen.
-- 📊 **Excel- & CSV-Export:**
+- 📊 **Excel- & CSV-Ergebnisexport (Ergebnisliste):**
   - **.xlsx:** Professionell formatierte Arbeitsmappe mit Wettkampf-Deckblatt, farbigen Tabellen und allen 10 Passen.
   - **.csv:** Standardisiert mit Semikolon-Trennung und UTF-8-BOM für den direkten Excel-Doppelklick.
+- 🔄 **JSON-Turnierimport & -Export (Wettkampf & Klassen):**
+  - Importiert und exportiert Turniername, Datum, Klassen und Schützen (Name, Vorname, Klasse, Verein, Gruppe, Scheibe) in Sekundenschnelle als strukturierte `.json`-Datei zur Datensicherung oder zum Austausch zwischen Rechnern.
+  - Inklusive Vorab-Validierung und interaktiver Live-Vorschau aller Schützen und Klassen vor dem Speichern.
 
 ---
 

@@ -20,6 +20,8 @@
    - [Live-Kamera vs. System-Kamera (HTTPS-Hinweis)](#live-kamera-vs-system-kamera-https-hinweis)
 4. [Wettkampf & Klassen verwalten](#4-wettkampf--klassen-verwalten)
    - [Neuen Wettkampf anlegen](#neuen-wettkampf-anlegen)
+   - [Turnier per JSON-Datei importieren](#turnier-per-json-datei-importieren)
+   - [Turnier per JSON-Datei exportieren](#turnier-per-json-datei-exportieren)
    - [Klassen konfigurieren & Entfernungsregeln (5 m vs. 7 m)](#klassen-konfigurieren--entfernungsregeln-5-m-vs-7-m)
    - [Zwischen Wettkämpfen wechseln](#zwischen-wettkämpfen-wechseln)
 5. [Schützenverwaltung & Startlisten](#5-schützenverwaltung--startlisten)
@@ -187,6 +189,59 @@ flowchart TD
 2. Geben Sie den Namen (z. B. *Vereinsmeisterschaft 2026*), das Datum und optional den Austragungsort ein.
 3. Lassen Sie das Häkchen bei *Standard-Klassen direkt anlegen* aktiviert, um die typischen DSB-Klassen automatisch zu laden.
 4. Klicken Sie auf **+ Wettkampf erstellen**.
+
+### Turnier per JSON-Datei importieren
+Statt Schützen und Klassen einzeln per Hand einzutippen, können Sie komplette Turniere aus einer einfachen `.json`-Datei importieren (z. B. aus Schützenverwaltungs-Software oder Meldelisten).
+
+1. Klicken Sie in der Kopfleiste auf **📥 Turnier-Import** oder im Tab **⚙️ Wettkampf & Klassen** auf **JSON importieren…** (auch im Tab **🎯 Schützen** über **📥 Turnier importieren** erreichbar).
+2. Wählen Sie Ihre `.json`-Datei aus oder ziehen Sie sie per Drag & Drop in das Upload-Feld.
+3. bgScore prüft die Datei sofort und zeigt eine übersichtliche **Live-Vorschau**:
+   - Turniername & Datum
+   - Alle erkannten Klassen
+   - Gesamtanzahl und vollständige Liste aller Schützen mit Klasse, Verein, Gruppe und Scheibe
+4. Klicken Sie auf **📥 Turnier jetzt importieren**. Der Wettkampf wird sofort in der Datenbank angelegt, aktiviert und die Schützenliste geladen.
+
+#### Struktur der Import-Datei (.json):
+```json
+{
+  "turniername": "Vereinsmeisterschaft 2026",
+  "datum": "07.11.2025",
+  "klassen": [
+    "Damen",
+    "Herren",
+    "Jugend"
+  ],
+  "schuetzen": [
+    {
+      "name": "Bader",
+      "vorname": "Anton",
+      "klasse": "Herren",
+      "verein": "SVW",
+      "gruppe": 2,
+      "scheibe": 1
+    },
+    {
+      "name": "Wagner",
+      "vorname": "Birgit",
+      "klasse": "Damen",
+      "verein": "SVW",
+      "gruppe": 1,
+      "scheibe": 1
+    }
+  ]
+}
+```
+> [!TIP]
+> - **Datumsformate:** Es werden deutsche Formate (`07.11.2025`), ISO-Formate (`2025-11-07`) und weitere gängige Schreibweisen automatisch erkannt und normiert.
+> - **Automatische Klassenergänzung:** Sollte ein Schütze in der Schützenliste eine Klasse aufweisen, die nicht in der Klassenliste aufgeführt war, legt bgScore diese Klasse automatisch an, sodass kein Teilnehmer verloren geht.
+> - **Gruppe & Scheibe:** Werden flexibel als Zahl (`1`, `2`) oder Text (`"Gruppe 1"`, `"Scheibe 3"`) übernommen.
+
+### Turnier per JSON-Datei exportieren
+Im Tab **⚙️ Wettkampf & Klassen** können Sie jedes angelegte Turnier als strukturierte JSON-Datei exportieren:
+- **Aktives Turnier:** Klicken Sie oben im Datenaustausch-Banner auf **📋 Aktives Turnier exportieren (.json)**.
+- **Beliebiges Turnier:** In der Liste *Vorhandene Wettkämpfe* befindet sich neben jedem Wettkampf ein eigener Button **📋 JSON**.
+- **Inhalt des Exports:** Enthält den Turniernamen, das Datum, alle definierten Klassen sowie alle zugeordneten Schützen (mit Name, Vorname, Klasse, Verein, Gruppe und Scheibe).
+- **Nutzen:** Perfekt zur Datensicherung, zur Weitergabe an andere Schießsportleiter oder zum Importieren auf einem anderen Rechner.
 
 ### Klassen konfigurieren & Entfernungsregeln (5 m vs. 7 m)
 Im Blasrohrsport hängt die Schussdistanz von der Altersklasse ab:

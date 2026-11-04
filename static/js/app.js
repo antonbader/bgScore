@@ -54,7 +54,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("galleryFileInput").addEventListener("change", handleFileSelected);
     document.getElementById("btnShowQrModal").addEventListener("click", openQrModal);
 
-        // Restore auto-save preference
+    // Initialize Tournament JSON Import Dropzone
+    initImportDropZone();
+
+    // Restore auto-save preference
     const autoSaveCheckbox = document.getElementById("chkAutoSaveOnScan");
     if (autoSaveCheckbox) {
         autoSaveCheckbox.checked = localStorage.getItem("bgscore_auto_save_scan") === "1";
@@ -1389,6 +1392,19 @@ async function deleteCompetition(compId) {
     await loadCompetitions();
 }
 
+function exportCompetitionJson(compId) {
+    if (!compId) return;
+    window.location.href = `/api/competitions/${compId}/export.json`;
+}
+
+function exportActiveCompetitionJson() {
+    if (!state.activeCompetitionId) {
+        showToast("Kein aktiver Wettkampf ausgewählt.", "warning");
+        return;
+    }
+    exportCompetitionJson(state.activeCompetitionId);
+}
+
 async function handleCreateClass(event) {
     event.preventDefault();
     const nameInput = document.getElementById("newClassName");
@@ -1440,12 +1456,13 @@ function renderCompetitionsAndClassesTab() {
                     📅 ${escapeHtml(c.date)}${locPart} · 👥 ${c.shooter_count || 0} Schützen
                 </div>
             </div>
-            <div>
+            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 ${
                     isActive
                         ? `<span class="status-pill done">Aktiv</span>`
                         : `<button type="button" class="btn btn-outline btn-sm" onclick="switchActiveCompetition(${c.id})">Auswählen</button>`
                 }
+                <button type="button" class="btn btn-outline btn-sm" onclick="exportCompetitionJson(${c.id})" title="Wettkampf als JSON-Datei exportieren">📋 JSON</button>
                 <button type="button" class="btn-danger-sm" onclick="deleteCompetition(${c.id})" title="Wettkampf löschen">🗑️</button>
             </div>
         `;
@@ -1871,5 +1888,238 @@ function resetScanForNextSheet() {
     if (window.innerWidth < 900) {
         const scanSec = document.getElementById("tab-scan");
         if (scanSec) scanSec.scrollIntoView({ behavior: "smooth" });
+    }
+}
+
+// =========================================================================
+// TOURNAMENT JSON IMPORT MODAL & LOGIC
+// =========================================================================
+let parsedImportData = null;
+
+function initImportDropZone() {
+    const dropZone = document.getElementById("importDropZone");
+    if (!dropZone) return;
+
+    dropZone.addEventListener("click", () => {
+        const input = document.getElementById("importFileInput");
+        if (input) input.click();
+    });
+
+    dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+    });
+
+    dropZone.addEventListener("dragleave", () => {
+        dropZone.classList.remove("dragover");
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            processImportFile(e.dataTransfer.files[0]);
+        }
+    });
+}
+
+function openImportModal() {
+    const input = document.getElementById("importFileInput");
+    if (input) input.value = "";
+    parsedImportData = null;
+
+    const previewContainer = document.getElementById("importPreviewContainer");
+    if (previewContainer) previewContainer.classList.add("hidden");
+
+    const errorContainer = document.getElementById("importErrorContainer");
+    if (errorContainer) {
+        errorContainer.classList.add("hidden");
+        errorContainer.textContent = "";
+    }
+
+    const btnExec = document.getElementById("btnExecuteImport");
+    if (btnExec) {
+        btnExec.disabled = true;
+        btnExec.textContent = "📥 Jetzt importieren";
+    }
+
+    const modal = document.getElementById("importModal");
+    if (modal) modal.classList.remove("hidden");
+}
+
+function closeImportModal() {
+    const modal = document.getElementById("importModal");
+    if (modal) modal.classList.add("hidden");
+    parsedImportData = null;
+}
+
+function handleImportFileSelect(event) {
+    if (event.target.files && event.target.files.length > 0) {
+        processImportFile(event.target.files[0]);
+    }
+}
+
+async function processImportFile(file) {
+    const errorContainer = document.getElementById("importErrorContainer");
+    const previewContainer = document.getElementById("importPreviewContainer");
+    const btnExec = document.getElementById("btnExecuteImport");
+
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (err) {
+            showImportError(`Die Datei "${escapeHtml(file.name)}" enthält kein gültiges JSON: ${err.message}`);
+            return;
+        }
+
+        if (typeof data !== "object" || data === null) {
+            showImportError("Die Datei enthält kein gültiges JSON-Objekt.");
+            return;
+        }
+
+        const turniername = (data.turniername || data.name || data.wettkampf || data.competition || "").trim();
+        if (!turniername) {
+            showImportError("In der JSON-Datei fehlt das Feld 'turniername'.");
+            return;
+        }
+
+        const rawShooters = data.schuetzen || data.shooters;
+        if (!Array.isArray(rawShooters)) {
+            showImportError("In der JSON-Datei fehlt das Feld 'schuetzen' (Liste aller Schützen).");
+            return;
+        }
+
+        const rawClasses = Array.isArray(data.klassen)
+            ? data.klassen
+            : (Array.isArray(data.classes) ? data.classes : []);
+
+        const classesSet = new Set(
+            rawClasses
+                .map((k) => (typeof k === "string" ? k.trim() : (k.name || "").trim()))
+                .filter(Boolean)
+        );
+
+        // Also add classes mentioned in shooters
+        rawShooters.forEach((s) => {
+            if (s && typeof s === "object") {
+                const k = (s.klasse || s.class || s.class_name || "").trim();
+                if (k) classesSet.add(k);
+            }
+        });
+
+        const classesList = Array.from(classesSet);
+        if (classesList.length === 0) {
+            classesList.push("Allgemeine Klasse");
+        }
+
+        // Fill Preview
+        document.getElementById("importPreviewName").textContent = turniername;
+        document.getElementById("importPreviewDate").textContent = data.datum || data.date || "Heute";
+        document.getElementById("importPreviewClassesCount").textContent = String(classesList.length);
+        document.getElementById("importPreviewShootersCount").textContent = String(rawShooters.length);
+        document.getElementById("importPreviewShootersCountBadge").textContent = String(rawShooters.length);
+
+        const chipsList = document.getElementById("importPreviewClassesList");
+        chipsList.innerHTML = "";
+        classesList.forEach((cls) => {
+            const chip = document.createElement("span");
+            chip.className = "preview-chip";
+            chip.textContent = cls;
+            chipsList.appendChild(chip);
+        });
+
+        const tbody = document.getElementById("importPreviewShootersTbody");
+        tbody.innerHTML = "";
+        rawShooters.forEach((s, idx) => {
+            if (!s || typeof s !== "object") return;
+            const lastName = escapeHtml(s.name || s.last_name || s.nachname || "–");
+            const firstName = escapeHtml(s.vorname || s.first_name || "–");
+            const klasse = escapeHtml(s.klasse || s.class || s.class_name || "–");
+            const verein = escapeHtml(s.verein || s.club || "–");
+            const gruppe = escapeHtml(String(s.gruppe !== undefined ? s.gruppe : (s.group || s.group_name || "–")));
+            const scheibe = escapeHtml(String(s.scheibe !== undefined ? s.scheibe : (s.stand || s.stand_number || "–")));
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${idx + 1}</td>
+                <td><strong>${lastName}</strong>, ${firstName}</td>
+                <td><span class="preview-chip">${klasse}</span></td>
+                <td>${verein}</td>
+                <td>${gruppe}</td>
+                <td>${scheibe}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        parsedImportData = data;
+        if (errorContainer) {
+            errorContainer.classList.add("hidden");
+            errorContainer.textContent = "";
+        }
+        if (previewContainer) previewContainer.classList.remove("hidden");
+        if (btnExec) btnExec.disabled = false;
+    } catch (err) {
+        showImportError(`Fehler beim Lesen der Datei: ${err.message}`);
+    }
+}
+
+function showImportError(message) {
+    const errorContainer = document.getElementById("importErrorContainer");
+    const previewContainer = document.getElementById("importPreviewContainer");
+    const btnExec = document.getElementById("btnExecuteImport");
+
+    if (previewContainer) previewContainer.classList.add("hidden");
+    if (btnExec) btnExec.disabled = true;
+
+    if (errorContainer) {
+        errorContainer.textContent = message;
+        errorContainer.classList.remove("hidden");
+    }
+    parsedImportData = null;
+}
+
+async function executeImport() {
+    if (!parsedImportData) return;
+
+    const btnExec = document.getElementById("btnExecuteImport");
+    if (btnExec) {
+        btnExec.disabled = true;
+        btnExec.textContent = "⏳ Wird importiert…";
+    }
+
+    try {
+        const res = await fetch("/api/competitions/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parsedImportData),
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+            showImportError(result.error || "Fehler beim Importieren des Turniers.");
+            if (btnExec) {
+                btnExec.disabled = false;
+                btnExec.textContent = "📥 Jetzt importieren";
+            }
+            return;
+        }
+
+        closeImportModal();
+        showToast(result.message || "Turnier erfolgreich importiert!", "success");
+
+        // Automatically activate imported competition
+        localStorage.setItem("bgscore_active_comp", String(result.id));
+        await loadCompetitions();
+        await switchTab("shooters");
+    } catch (err) {
+        showImportError(`Netzwerkfehler beim Importieren: ${err.message}`);
+        if (btnExec) {
+            btnExec.disabled = false;
+            btnExec.textContent = "📥 Jetzt importieren";
+        }
     }
 }

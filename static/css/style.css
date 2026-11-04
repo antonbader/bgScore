@@ -1785,3 +1785,136 @@ body {
     color: #047857;
 }
 
+/* =========================================================================
+   Tournament JSON Import Styles
+   ========================================================================= */
+.import-banner-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: var(--radius-sm);
+    flex-wrap: wrap;
+}
+
+.import-banner-text strong {
+    font-size: 0.9rem;
+    color: var(--text-main);
+    display: block;
+}
+
+.import-banner-text p {
+    font-size: 0.8rem;
+    margin: 2px 0 0 0;
+}
+
+.import-drop-zone {
+    border: 2px dashed #cbd5e1;
+    border-radius: var(--radius-md);
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    background: #f8fafc;
+    transition: all 0.2s ease;
+}
+
+.import-drop-zone:hover,
+.import-drop-zone.dragover {
+    border-color: var(--primary);
+    background: #eff6ff;
+}
+
+.import-drop-icon {
+    font-size: 2.2rem;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.import-drop-title {
+    font-size: 0.95rem;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.import-summary-card {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+}
+
+.import-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px 12px;
+}
+
+.summary-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.summary-value {
+    font-size: 0.95rem;
+    color: var(--text-main);
+}
+
+.summary-value.highlight {
+    color: var(--primary);
+}
+
+.summary-value.text-success {
+    color: #16a34a;
+}
+
+.preview-chips-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.preview-chip {
+    font-size: 0.75rem;
+    background: #e2e8f0;
+    color: #334155;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-weight: 500;
+}
+
+.preview-table-container {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    margin-top: 6px;
+}
+
+.preview-table {
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.preview-table th,
+.preview-table td {
+    padding: 6px 10px;
+}
+
+.import-error-box {
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: 0.85rem;
+}
+

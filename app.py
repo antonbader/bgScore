@@ -429,6 +429,165 @@ def create_competition():
     return jsonify({"id": comp_id, "message": "Wettkampf erfolgreich angelegt."}), 201
 
 
+def _normalize_date_str(date_val: Any) -> str:
+    s = str(date_val or "").strip()
+    if not s:
+        return datetime.now().strftime("%Y-%m-%d")
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d.%m.%y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return s
+
+
+@app.route("/api/competitions/import", methods=["POST"])
+def import_competition():
+    """
+    Imports a competition from JSON containing:
+      - turniername: str
+      - datum: str (DD.MM.YYYY or YYYY-MM-DD)
+      - klassen: list of class names (str)
+      - schuetzen: list of shooters with name, vorname, klasse, verein, gruppe, scheibe
+    Accepts application/json or multipart/form-data (file upload).
+    """
+    raw_data = None
+    if request.files:
+        file_obj = next(iter(request.files.values()), None)
+        if file_obj:
+            content = file_obj.read()
+            if content.startswith(b"\xef\xbb\xbf"):
+                content = content[3:]
+            try:
+                raw_data = json.loads(content.decode("utf-8"))
+            except Exception as e:
+                return jsonify({"error": f"Ungültiges JSON in Datei: {str(e)}"}), 400
+    elif request.is_json:
+        raw_data = request.get_json(silent=True)
+    elif request.data:
+        try:
+            content = request.data
+            if content.startswith(b"\xef\xbb\xbf"):
+                content = content[3:]
+            raw_data = json.loads(content.decode("utf-8"))
+        except Exception as e:
+            return jsonify({"error": f"Ungültiges JSON: {str(e)}"}), 400
+
+    if not isinstance(raw_data, dict):
+        return jsonify({"error": "Ungültiges Datenformat: JSON-Objekt erwartet."}), 400
+
+    turniername = (
+        raw_data.get("turniername")
+        or raw_data.get("name")
+        or raw_data.get("wettkampf")
+        or raw_data.get("competition")
+        or ""
+    )
+    turniername = str(turniername).strip()
+    if not turniername:
+        return jsonify({"error": "Kein 'turniername' in der JSON-Datei angegeben."}), 400
+
+    datum_raw = raw_data.get("datum") if "datum" in raw_data else raw_data.get("date")
+    date_normalized = _normalize_date_str(datum_raw)
+
+    klassen_raw = raw_data.get("klassen") if "klassen" in raw_data else raw_data.get("classes", [])
+    if not isinstance(klassen_raw, list):
+        klassen_raw = []
+
+    klassen_list: List[str] = []
+    seen_classes = set()
+    for k in klassen_raw:
+        cname = (k.get("name") if isinstance(k, dict) else str(k)).strip()
+        if cname and cname.lower() not in seen_classes:
+            klassen_list.append(cname)
+            seen_classes.add(cname.lower())
+
+    schuetzen_raw = raw_data.get("schuetzen") if "schuetzen" in raw_data else raw_data.get("shooters", [])
+    if not isinstance(schuetzen_raw, list):
+        return jsonify({"error": "'schuetzen' muss eine Liste von Schützen-Einträgen sein."}), 400
+
+    # Auto-add classes from shooters if not already present in 'klassen'
+    for s in schuetzen_raw:
+        if isinstance(s, dict):
+            cname = str(s.get("klasse") or s.get("class") or s.get("class_name") or "").strip()
+            if cname and cname.lower() not in seen_classes:
+                klassen_list.append(cname)
+                seen_classes.add(cname.lower())
+
+    if not klassen_list:
+        klassen_list = ["Allgemeine Klasse"]
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "INSERT INTO competitions (name, date, location, distance, created_at) VALUES (?, ?, ?, ?, ?)",
+            (turniername, date_normalized, "", "7 m", now),
+        )
+        comp_id = cur.lastrowid
+
+        class_map: Dict[str, int] = {}
+        for idx, cname in enumerate(klassen_list):
+            cur.execute(
+                "INSERT INTO classes (competition_id, name, sort_order) VALUES (?, ?, ?)",
+                (comp_id, cname, idx + 1),
+            )
+            class_id = cur.lastrowid
+            class_map[cname.lower()] = class_id
+
+        created_shooters = 0
+        for s in schuetzen_raw:
+            if not isinstance(s, dict):
+                continue
+
+            last_name = str(s.get("name") or s.get("last_name") or s.get("nachname") or "").strip()
+            first_name = str(s.get("vorname") or s.get("first_name") or "").strip()
+
+            if not last_name and not first_name:
+                continue
+
+            cname = str(s.get("klasse") or s.get("class") or s.get("class_name") or "").strip()
+            class_id = class_map.get(cname.lower())
+            if not class_id:
+                class_id = list(class_map.values())[0]
+
+            club = str(s.get("verein") or s.get("club") or "").strip()
+
+            grp_val = s.get("gruppe") if "gruppe" in s else s.get("group", s.get("group_name"))
+            group_name = str(grp_val).strip() if grp_val is not None else ""
+
+            sch_val = s.get("scheibe") if "scheibe" in s else s.get("stand", s.get("stand_number"))
+            stand_number = str(sch_val).strip() if sch_val is not None else ""
+
+            cur.execute(
+                """
+                INSERT INTO shooters (competition_id, class_id, last_name, first_name, club, group_name, stand_number, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (comp_id, class_id, last_name, first_name, club, group_name, stand_number, now),
+            )
+            created_shooters += 1
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({"error": f"Fehler beim Speichern in der Datenbank: {str(e)}"}), 500
+
+    conn.close()
+
+    return jsonify({
+        "id": comp_id,
+        "name": turniername,
+        "date": date_normalized,
+        "classes_count": len(class_map),
+        "shooters_count": created_shooters,
+        "message": f"Turnier '{turniername}' erfolgreich importiert ({len(class_map)} Klassen, {created_shooters} Schützen)."
+    }), 201
+
+
 @app.route("/api/competitions/<int:comp_id>", methods=["PUT"])
 def update_competition(comp_id: int):
     data = request.get_json(force=True)
@@ -1161,6 +1320,74 @@ def export_xlsx(comp_id: int):
         as_attachment=True,
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/competitions/<int:comp_id>/export.json", methods=["GET"])
+def export_json(comp_id: int):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT name, date FROM competitions WHERE id = ?", (comp_id,))
+    comp_row = cur.fetchone()
+    if not comp_row:
+        conn.close()
+        return jsonify({"error": "Wettkampf nicht gefunden."}), 404
+
+    comp_name = comp_row["name"]
+    comp_date = scorecard_pdf.format_date_de(comp_row["date"])
+
+    cur.execute(
+        "SELECT id, name FROM classes WHERE competition_id = ? ORDER BY sort_order ASC, name ASC",
+        (comp_id,),
+    )
+    classes_rows = cur.fetchall()
+    classes_list = [r["name"] for r in classes_rows]
+    class_id_to_name = {r["id"]: r["name"] for r in classes_rows}
+
+    cur.execute(
+        "SELECT id, class_id, last_name, first_name, club, group_name, stand_number FROM shooters WHERE competition_id = ? ORDER BY id ASC",
+        (comp_id,),
+    )
+    shooters_rows = cur.fetchall()
+    shooters_list = []
+    for s in shooters_rows:
+        grp = s["group_name"] or ""
+        try:
+            grp_val = int(grp) if grp != "" and grp.isdigit() else grp
+        except Exception:
+            grp_val = grp
+
+        st = s["stand_number"] or ""
+        try:
+            st_val = int(st) if st != "" and st.isdigit() else st
+        except Exception:
+            st_val = st
+
+        shooters_list.append({
+            "name": s["last_name"],
+            "vorname": s["first_name"],
+            "klasse": class_id_to_name.get(s["class_id"], ""),
+            "verein": s["club"] or "",
+            "gruppe": grp_val,
+            "scheibe": st_val,
+        })
+
+    conn.close()
+
+    export_data = {
+        "turniername": comp_name,
+        "datum": comp_date,
+        "klassen": classes_list,
+        "schuetzen": shooters_list,
+    }
+
+    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in comp_name)
+    filename = f"bgScore_{safe_name}.json"
+
+    return Response(
+        json.dumps(export_data, indent=2, ensure_ascii=False).encode("utf-8"),
+        mimetype="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

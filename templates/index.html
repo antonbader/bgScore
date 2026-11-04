@@ -35,6 +35,9 @@
                 <button type="button" class="btn btn-ghost btn-sm" onclick="openScorecardPdfModal()" title="Vorbefüllte Schießzettel oder Leer-Vorlage als PDF generieren">
                     📄 <span class="hide-xs">Schießzettel-PDF</span>
                 </button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="openImportModal()" title="Turnier per JSON-Datei importieren">
+                    📥 <span class="hide-xs">Turnier-Import</span>
+                </button>
             </div>
         </div>
 
@@ -549,6 +552,9 @@
                     <div class="card-header" style="flex-wrap: wrap;">
                         <h2>Angelegte Schützen</h2>
                         <div class="header-inline-filter" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-outline btn-sm" onclick="openImportModal()" title="Turnier / Schützen aus JSON importieren">
+                                📥 Turnier importieren
+                            </button>
                             <button type="button" class="btn btn-primary btn-sm" onclick="openScorecardPdfModal()">
                                 📄 Vorbefüllte Schießzettel (PDF)
                             </button>
@@ -585,6 +591,22 @@
                 <div class="card">
                     <div class="card-header">
                         <h2>Wettkämpfe verwalten</h2>
+                    </div>
+
+                    <!-- Tournament JSON Import & Export Quick Action -->
+                    <div class="import-banner-box mb-4">
+                        <div class="import-banner-text">
+                            <strong>🔄 Turnier-Datenaustausch (JSON)</strong>
+                            <p class="text-muted mb-0">Turniername, Datum, Klassen &amp; Schützenliste als .json importieren oder sichern</p>
+                        </div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-outline btn-sm" onclick="openImportModal()">
+                                📥 JSON importieren…
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="exportActiveCompetitionJson()" title="Aktiven Wettkampf als JSON-Datei exportieren">
+                                📋 Aktives Turnier exportieren (.json)
+                            </button>
+                        </div>
                     </div>
 
                     <form id="competitionForm" onsubmit="handleCreateCompetition(event)" class="mb-4">
@@ -804,6 +826,87 @@
             <p class="lan-url-display"><code id="lanUrlText">http://127.0.0.1:5000</code></p>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary btn-block" onclick="closeQrModal()">Schließen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tournament JSON Import Modal -->
+    <div id="importModal" class="modal-backdrop hidden">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-header">
+                <h3>📥 Turnier aus JSON-Datei importieren</h3>
+                <button type="button" class="modal-close" onclick="closeImportModal()">✕</button>
+            </div>
+            <p class="helper-text">
+                Importiere einen kompletten Wettkampf inklusive Datum, Klassen und Schützen (Name, Vorname, Klasse, Verein, Gruppe und Scheibe) aus einer JSON-Datei.
+            </p>
+
+            <!-- Dropzone / File Picker -->
+            <div id="importDropZone" class="import-drop-zone">
+                <input type="file" id="importFileInput" accept=".json,application/json" class="hidden" onchange="handleImportFileSelect(event)">
+                <div class="import-drop-content">
+                    <span class="import-drop-icon">📄</span>
+                    <div class="import-drop-title"><strong>JSON-Datei auswählen</strong> oder hierher ziehen</div>
+                    <small class="text-muted">Unterstützt Dateien mit turniername, datum, klassen und schuetzen</small>
+                </div>
+            </div>
+
+            <!-- Preview Container (shown once JSON is parsed) -->
+            <div id="importPreviewContainer" class="hidden mt-3">
+                <div class="import-summary-card">
+                    <div class="import-summary-grid">
+                        <div class="summary-col">
+                            <span class="summary-label">Turniername</span>
+                            <strong id="importPreviewName" class="summary-value highlight">–</strong>
+                        </div>
+                        <div class="summary-col">
+                            <span class="summary-label">Datum</span>
+                            <strong id="importPreviewDate" class="summary-value">–</strong>
+                        </div>
+                        <div class="summary-col">
+                            <span class="summary-label">Klassen</span>
+                            <strong id="importPreviewClassesCount" class="summary-value">0</strong>
+                        </div>
+                        <div class="summary-col">
+                            <span class="summary-label">Schützen</span>
+                            <strong id="importPreviewShootersCount" class="summary-value text-success">0</strong>
+                        </div>
+                    </div>
+                    <div class="summary-classes mt-2">
+                        <span class="summary-label">Erkannte Klassen:</span>
+                        <div id="importPreviewClassesList" class="preview-chips-list"></div>
+                    </div>
+                </div>
+
+                <div class="preview-shooters-header mt-3">
+                    <strong>Erkannte Schützen (<span id="importPreviewShootersCountBadge">0</span>):</strong>
+                </div>
+                <div class="table-responsive preview-table-container">
+                    <table class="data-table preview-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px;">#</th>
+                                <th>Name, Vorname</th>
+                                <th>Klasse</th>
+                                <th>Verein</th>
+                                <th style="width: 70px;">Gruppe</th>
+                                <th style="width: 70px;">Scheibe</th>
+                            </tr>
+                        </thead>
+                        <tbody id="importPreviewShootersTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Error Message Container -->
+            <div id="importErrorContainer" class="hidden alert alert-danger mt-3"></div>
+
+            <!-- Modal Footer -->
+            <div class="modal-footer mt-3" style="display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="btn btn-ghost" onclick="closeImportModal()">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="btnExecuteImport" onclick="executeImport()" disabled>
+                    📥 Jetzt importieren
+                </button>
             </div>
         </div>
     </div>
