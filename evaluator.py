@@ -1011,11 +1011,11 @@ def generate_test_scorecard_image(
     draw.text((margin_l, int(11.5 * scale)), "Blasrohr - Ergebniszettel", fill=(0, 0, 0), font=font_title)
 
     ab_letter = "A" if int(half) == 1 else "B"
-    bx0, by0, bx1, by1 = int(151.0 * scale), int(10 * scale), int(162.0 * scale), int(18.8 * scale)
+    bx0, by0, bx1, by1 = int(78.5 * scale), int(10 * scale), int((78.5 + 11.0) * scale), int(18.8 * scale)
     draw.rectangle([bx0, by0, bx1, by1], outline=(0, 0, 0), width=2)
     draw.text((bx0 + int(3.5 * scale), by0 + int(1.6 * scale)), ab_letter, fill=(0, 0, 0), font=font_box_ab)
 
-    # Render QR code in top-right header (165.0 .. 193.5 mm, y = 15.2 .. 43.7 mm)
+    # Render QR code in top-right header (156.5 .. 193.0 mm, y = 9.5 .. 46.0 mm)
     is_5m = "5" in (distance or "") or "5 m" in (class_name or "").lower() or "5m" in (class_name or "").lower()
     resolved_dist = "5 m" if is_5m else "7 m"
     qr_payload = qr_codec.encode_scorecard_qr_payload(
@@ -1031,10 +1031,10 @@ def generate_test_scorecard_image(
         shooter_id=shooter_id,
         competition_id=competition_id,
     )
-    qr_pil = qr_codec.make_scorecard_qr_image(qr_payload, box_size=6, border=2)
-    qr_px_sz = int(round(28.5 * scale))
+    qr_pil = qr_codec.make_scorecard_qr_image(qr_payload, box_size=8, border=2)
+    qr_px_sz = int(round(36.5 * scale))
     qr_pil_resized = qr_pil.resize((qr_px_sz, qr_px_sz), Image.Resampling.NEAREST)
-    img.paste(qr_pil_resized, (int(round(165.0 * scale)), int(round(15.2 * scale))))
+    img.paste(qr_pil_resized, (int(round(156.5 * scale)), int(round(9.5 * scale))))
 
     fields_left = [
         ("Wettbewerb", competition_name, 21.0),

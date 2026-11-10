@@ -305,6 +305,10 @@ Die generierten PDFs enthalten im Kopfbereich bereits gestochen scharf:
 - Gruppe & Standnummer
 - **Kompakter QR-Code:** Beinhaltet alle Headerdaten und die Zettelhälfte (A oder B). Beim späteren Fotografieren liest die Software diese Daten aus – Verwechslungen sind ausgeschlossen!
 
+> [!TIP]
+> **Druck auf Din A5 (Papiersparmodus):**
+> Die Schießzettel sind so gestaltet, dass sie sowohl auf **Din A4** als auch auf **Din A5** (z. B. „2 Seiten pro Blatt“ oder direktes A5-Papier) gedruckt werden können. Der QR-Code wurde mit vergrößerter Abmessung (36,5 mm auf A4 / ca. 26 mm auf A5) und hochrobusten, großen Modulen gestaltet, sodass Smartphone- und Tabletkameras den Code auch bei A5-Skalierung, niedrigerer Auflösung oder leichter Unschärfe sofort und zuverlässig erfassen.
+
 ### Druckmodi: Gesamt, pro Klasse, pro Verein, pro Gruppe
 Sie können wählen, wie die PDFs generiert werden sollen:
 1. **📚 Gesamt:** Ein einziges zusammenhängendes PDF mit allen Schützen (ideal für den schnellen Komplettdruck).

@@ -587,8 +587,8 @@ async function startLiveCamera() {
             stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: { ideal: currentFacingMode },
-                    width: { ideal: 1600 },
-                    height: { ideal: 1200 },
+                    width: { ideal: 1920, min: 1280 },
+                    height: { ideal: 1440, min: 720 },
                 },
                 audio: false,
             });
