@@ -367,17 +367,17 @@ def draw_scorecard_page(
         right_line_x0 = 130.5
         right_line_x1 = margin_r
     else:
-        # Leave a dedicated 28 x 28 mm zone on the right of the header for the QR code
-        qr_size_mm = 28.5
-        qr_x_mm = margin_r - qr_size_mm + 1.0  # 165.0 mm .. 193.5 mm
-        qr_y_top_mm = 15.2
+        # Optimized 36.5 mm QR code zone for razor-sharp camera scanning even on Din A5 printouts
+        qr_size_mm = 36.5
+        qr_x_mm = margin_r - qr_size_mm + 0.5  # 156.5 mm .. 193.0 mm
+        qr_y_top_mm = 9.5                     # 9.5 mm .. 46.0 mm
 
-        ab_x = 151.0  # Aligned with the right end of the header lines (162.0 mm)
-        left_line_x0 = 45.0
-        left_line_x1 = 96.5
-        right_label_x = 100.5
-        right_line_x0 = 124.5
-        right_line_x1 = 162.0
+        ab_x = 78.5  # Placed right next to the title "Blasrohr - Ergebniszettel [ A ]"
+        left_line_x0 = 44.0
+        left_line_x1 = 96.0
+        right_label_x = 99.0
+        right_line_x0 = 122.0
+        right_line_x1 = 153.5
 
         qr_payload = qr_codec.encode_scorecard_qr_payload(
             half=half,
@@ -468,15 +468,15 @@ def draw_scorecard_page(
 
     c.setFont(FONT_BOLD, 10.5)
     c.drawString((right_line_x0 + 0.5) * mm, (PAGE_H - y_entf) * mm, "7 m")
-    box7_x = right_line_x0 + 9.0
+    box7_x = right_line_x0 + 8.5
     box_y_bottom = PAGE_H - (y_entf + 0.3)
     box_sz = 3.6
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.8)
     c.rect(box7_x * mm, box_y_bottom * mm, box_sz * mm, box_sz * mm, stroke=1, fill=0)
 
-    c.drawString((right_line_x0 + 20.5) * mm, (PAGE_H - y_entf) * mm, "5 m")
-    box5_x = right_line_x0 + 29.0
+    c.drawString((right_line_x0 + 18.5) * mm, (PAGE_H - y_entf) * mm, "5 m")
+    box5_x = right_line_x0 + 26.5
     c.rect(box5_x * mm, box_y_bottom * mm, box_sz * mm, box_sz * mm, stroke=1, fill=0)
 
     if not is_blank_template and distance:

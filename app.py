@@ -961,6 +961,28 @@ def _resolve_shooter_from_qr(
         if shooter_row is None:
             return None
 
+        # Backfill full values into qr_data for rich frontend banner display
+        try:
+            if not qr_data.get("name") or qr_data.get("name") == "-":
+                ln = shooter_row["last_name"] or ""
+                fn = shooter_row["first_name"] or ""
+                qr_data["name"] = f"{ln}, {fn}" if (ln and fn) else (ln or fn)
+            if not qr_data.get("verein") and shooter_row.get("club"):
+                qr_data["verein"] = shooter_row["club"]
+            if not qr_data.get("klasse") and shooter_row.get("class_name"):
+                qr_data["klasse"] = shooter_row["class_name"]
+            if not qr_data.get("gruppe") and shooter_row.get("group_name"):
+                qr_data["gruppe"] = shooter_row["group_name"]
+            if not qr_data.get("standnummer") and shooter_row.get("stand_number"):
+                qr_data["standnummer"] = shooter_row["stand_number"]
+            if not qr_data.get("wettbewerb") and comp_id:
+                cur.execute("SELECT name FROM competitions WHERE id = ?", (comp_id,))
+                c_row = cur.fetchone()
+                if c_row and c_row["name"]:
+                    qr_data["wettbewerb"] = c_row["name"]
+        except Exception:
+            pass
+
         return {
             "id": int(shooter_row["id"]),
             "competition_id": int(shooter_row["competition_id"]),
