@@ -12,8 +12,10 @@
    - [Aufbau der Schießzettel (Zettel A & Zettel B)](#aufbau-der-schießzettel-zettel-a--zettel-b)
 2. [Systemvoraussetzungen & Installation](#2-systemvoraussetzungen--installation)
    - [Systemanforderungen](#systemanforderungen)
-   - [Installation unter Windows (Schnellstart)](#installation-unter-windows-schnellstart)
+   - [Option A: Direktstart über die eigenständige Windows-EXE (ohne Python)](#option-a-direktstart-über-die-eigenständige-windows-exe-ohne-python)
+   - [Option B: Installation unter Windows mit Python (`start_bgscore.bat`)](#option-b-installation-unter-windows-mit-python-start_bgscorebat)
    - [Manuelle Installation über Python & pip](#manuelle-installation-über-python--pip)
+   - [Eigene Windows-EXE erstellen (`build_exe.bat` / `auto-py-to-exe`)](#eigene-windows-exe-erstellen-build_exebat--auto-py-to-exe)
 3. [Netzwerk & mobile Nutzung (Smartphone / Tablet)](#3-netzwerk--mobile-nutzung-smartphone--tablet)
    - [Einsatz im lokalen WLAN](#einsatz-im-lokalen-wlan)
    - [Verbindung per QR-Code ("Handy-Link")](#verbindung-per-qr-code-handy-link)
@@ -30,7 +32,9 @@
    - [Gruppen- und Standnummern zuweisen](#gruppen--und-standnummern-zuweisen)
 6. [Schießzettel drucken (PDF-Generator)](#6-schießzettel-drucken-pdf-generator)
    - [Vorbefüllte Schießzettel mit individuellem QR-Code](#vorbefüllte-schießzettel-mit-individuellem-qr-code)
+   - [Seitenlayouts & 2-Schützen-Paarung auf DIN A4](#seitenlayouts--2-schützen-paarung-auf-din-a4)
    - [Druckmodi: Gesamt, pro Klasse, pro Verein, pro Gruppe](#druckmodi-gesamt-pro-klasse-pro-verein-pro-gruppe)
+   - [Zettel-Hälften & Entfernungsvorwahl](#zettel-hälften--entfernungsvorwahl)
    - [Leere Schießzettel als Reserve](#leere-schießzettel-als-reserve)
 7. [Zettelauswertung & Bilderkennung](#7-zettelauswertung--bilderkennung)
    - [Der Auswertungs-Ablauf im Überblick](#der-auswertungs-ablauf-im-überblick)
@@ -105,13 +109,22 @@ Jeder Schütze erhält für seinen Wettkampf zwei getrennte Zettel (oder einen d
 
 ### Systemanforderungen
 - **Betriebssystem:** Windows 10/11, macOS oder Linux.
-- **Python:** Python 3.10 oder neuer (empfohlen: Python 3.11 / 3.12).
+- **Python:** Python 3.10 oder neuer (empfohlen: Python 3.11 / 3.12) – *entfällt bei Nutzung der eigenständigen `bgScore.exe` unter Windows*.
 - **Webbrowser:** Chrome, Edge, Firefox oder Safari (auf PC, Laptop, Tablet oder Smartphone).
 - **Netzwerk:** Für die Smartphone-Kopplung sollten PC und Smartphone im selben WLAN (oder Handy-Hotspot) angemeldet sein.
 
 ---
 
-### Installation unter Windows (Schnellstart)
+### Option A: Direktstart über die eigenständige Windows-EXE (ohne Python)
+Für den Einsatz auf Vereinsrechnern ohne installierte Python-Umgebung kann bgScore als portable Windows-Anwendung (`bgScore.exe`) ausgeführt werden:
+1. Öffnen Sie den Ordner `output\` (oder kopieren Sie `bgScore.exe` in einen beliebigen Vereinsordner bzw. auf einen USB-Stick).
+2. Klicken Sie doppelt auf **`bgScore.exe`**.
+3. Das Serverfenster startet und öffnet die Anwendung automatisch im Standard-Webbrowser unter `http://localhost:5000`.
+4. **Persistente Datenhaltung:** Die Datenbank `bgscore.db` wird automatisch im selben Ordner neben der `bgScore.exe` gespeichert – beim Beenden des Programms gehen keinerlei Turnierdaten verloren.
+
+---
+
+### Option B: Installation unter Windows mit Python (`start_bgscore.bat`)
 1. **Projektordner öffnen:** Entpacken Sie bgScore oder klonen Sie das Repository in einen lokalen Ordner (z. B. `C:\bgScore`).
 2. **Abhängigkeiten installieren:**  
    Öffnen Sie die Eingabeaufforderung (PowerShell oder CMD) im Ordner und führen Sie aus:
@@ -141,7 +154,19 @@ pip install -r requirements.txt
 # 3. Server starten
 python app.py
 ```
-Der Server lauscht auf allen lokalen Netzwerk-Schnittstellen (`0.0.0.0:5000`) und stellt die Anwendung bereit.
+Der Server lauscht auf allen lokalen Netzwerk-Schnittstellen (`0.0.0.0:5000`), öffnet automatisch den Standard-Browser auf `http://localhost:5000` und stellt die Anwendung im lokalen Netzwerk bereit.
+
+---
+
+### Eigene Windows-EXE erstellen (`build_exe.bat` / `auto-py-to-exe`)
+Wenn Sie Änderungen am Quellcode vorgenommen haben oder selbst eine aktuelle `bgScore.exe` erzeugen möchten, stehen zwei Komfort-Skripte bereit:
+- **Automatischer 1-Klick-Build (`build_exe.bat`):**
+  1. Stellen Sie sicher, dass PyInstaller installiert ist (`pip install pyinstaller`).
+  2. Starten Sie **`build_exe.bat`** per Doppelklick.
+  3. Das Skript bündelt alle Vorlagen (`templates`), statischen Dateien (`static`) sowie die SSL-Zertifikate (`cert.pem`, `key.pem`) in die Datei **`output\bgScore.exe`**.
+- **Grafische Oberfläche (`starte_auto_py_to_exe.bat`):**
+  1. Installieren Sie bei Bedarf `pip install auto-py-to-exe`.
+  2. Starten Sie **`starte_auto_py_to_exe.bat`** – die vorkonfigurierte Projektdatei `auto-py-to-exe-config.json` wird automatisch geladen.
 
 ---
 
@@ -281,12 +306,12 @@ Die Zuordnung zu Gruppen und Ständen erleichtert die Organisation ungemein:
 
 Ein Highlight von bgScore ist der integrierte **Schießzettel-Generator nach DSB-Norm**. Er erspart das mühsame handschriftliche Ausfüllen von Hunderten Zetteln vor dem Schießen.
 
-Öffnen Sie den Dialog über den Button **📄 Schießzettel-PDF** (in der Kopfzeile oder im Schützen-Tab).
+Öffnen Sie den Dialog über den Button **📄 Schießzettel-PDF** (in der Kopfzeile, im Schützen-Tab oder in der Ergebnisliste).
 
 ```
 +-------------------------------------------------------------------+
 |  Blasrohrsport - Ergebniszettel               [ QR-CODE ]         |
-|  Wettbewerb: Vereinsmeisterschaft 2026       BG1|1|Vereinsm.|...  |
+|  Wettbewerb: Vereinsmeisterschaft 2026       BG2|1|12|1|Muster... |
 |  Name: Mustermann, Max       Verein: SV Grün-Weiß                 |
 |  Klasse: Herren              Entfernung: 7 m    Stand: 4          |
 +-------------------------------------------------------------------+
@@ -303,31 +328,49 @@ Die generierten PDFs enthalten im Kopfbereich bereits gestochen scharf:
 - Verein
 - Klasse & automatisch ermittelte Schussdistanz (5 m / 7 m)
 - Gruppe & Standnummer
-- **Kompakter QR-Code:** Beinhaltet alle Headerdaten und die Zettelhälfte (A oder B). Beim späteren Fotografieren liest die Software diese Daten aus – Verwechslungen sind ausgeschlossen!
+- **Ultrakompakter QR-Code (`BG2`-Format):** Beinhaltet alle Headerdaten, Schützen-/Turnier-IDs und die Zettelhälfte (A oder B). Beim späteren Fotografieren liest die Software diese Daten aus – Verwechslungen sind ausgeschlossen!
 
 > [!TIP]
-> **Druck auf Din A5 / 2 Zettel pro DIN A4 Seite (Papiersparmodus):**
-> Die Schießzettel sind so gestaltet, dass sie sowohl einzeln auf **Din A4** als auch zu zweit nebeneinander (je **Din A5**) auf einer **Din A4 Seite** gedruckt werden können. Der QR-Code wurde mit vergrößerter Abmessung (36,5 mm auf A4 / ca. 26 mm auf A5) und hochrobusten, großen Modulen gestaltet, sodass Smartphone- und Tabletkameras den Code auch bei A5-Skalierung sofort und zuverlässig erfassen.
+> **Druck auf DIN A5 / 2 Zettel pro DIN A4 Seite (Papiersparmodus):**
+> Die Schießzettel sind so gestaltet, dass sie sowohl einzeln auf **DIN A4** als auch zu zweit nebeneinander (je **DIN A5** im Hochformat) auf einer **DIN A4 Querformat-Seite** gedruckt werden können, ohne dass sich das Seitenverhältnis für die spätere Kamera-Erkennung verändert. Der QR-Code wurde mit vergrößerter Abmessung (36,5 mm auf A4 / ca. 26 mm auf A5) und dem kompakten `BG2`-Datenformat (große, kontraststarke Module) optimiert, sodass Smartphone- und Tabletkameras den Code auch bei A5-Skalierung sofort und mit 100 % Zuverlässigkeit erfassen.
 
 ### Seitenlayouts & 2-Schützen-Paarung auf DIN A4
 Im PDF-Generator können Sie unter **1. Seitenlayout & Schützen-Anordnung auf DIN A4** zwischen vier Layouts wählen:
-1. **📄 1 Zettel pro DIN A4 Seite:** Klassischer Einzeldruck (jeder Schießzettel groß im DIN A4 Hochformat).
-2. **📑 2 Zettel auf eine DIN A4 Seite:** Platziert pro Schütze die 1. Hälfte (Zettel A) links und die 2. Hälfte (Zettel B) rechts nebeneinander auf einer DIN A4 Seite (mit feiner Schnittlinie in der Mitte).
-3. **👥 2 Schützen pro Seite (Scheibe 1+2, 3+4…):** Druckt immer zwei benachbarte Schützen derselben Gruppe (Scheibe 1+2, Scheibe 3+4, Scheibe 5+6 usw.) mit der **gleichen Schießhälfte** zusammen auf eine DIN A4 Seite (Seite 1: beide Schützen 1. Hälfte A; Seite 2: beide Schützen 2. Hälfte B). Ist an einer benachbarten Scheibe kein Schütze eingeteilt, wird für diese Scheibe automatisch ein **nicht vorbefüllter Schießzettel** miterstellt.
-4. **🛠️ 2 Schützen pro Seite (Manuell):** Erlaubt das freie Zusammenstellen von jeweils zwei Schützen pro Seite (inklusive Tauschen Links/Rechts, Hinzufügen nicht vorbefüllter Zettel und Vorbefüllen aus der Scheiben-Zuordnung).
+
+1. **📄 1 Zettel pro DIN A4 Seite:**  
+   Klassischer Einzeldruck (jeder Schießzettel groß im DIN A4 Hochformat).
+2. **📑 2 Zettel auf eine DIN A4 Seite:**  
+   Platziert pro Schütze die **1. Hälfte (Zettel A)** links und die **2. Hälfte (Zettel B)** rechts nebeneinander im DIN-A5-Format auf einer DIN A4 Seite (mit feiner vertikaler Schnittlinie in der Mitte).
+3. **👥 2 Schützen pro Seite (Scheibe 1+2, 3+4…):**  
+   Ideal für gemeinsame Klemmbretter an den Scheiben: Druckt immer zwei benachbarte Schützen derselben Gruppe (**Scheibe 1+2, Scheibe 3+4, Scheibe 5+6** usw.) mit der **gleichen Schießhälfte** zusammen auf eine DIN A4 Seite (Seite 1: beide Schützen 1. Hälfte A; Seite 2: beide Schützen 2. Hälfte B).
+   - **Freie Nachbarscheibe:** Ist an einer gepaarten Scheibe kein Schütze eingeteilt (z. B. Scheibe 1 belegt, Scheibe 2 frei), wird auf der zweiten Blatthälfte automatisch ein **nicht vorbefüllter Schießzettel** (mit Wettbewerb, Datum, Gruppe und der freien Scheibennummer) miterstellt.
+   - **Paarungs-Vorschau:** Im Dialog sehen Sie sofort eine Übersicht aller gebildeten Scheiben-Paare und können diese bei Bedarf über **✏️ Paarungen manuell anpassen** individuell bearbeiten.
+4. **🛠️ 2 Schützen pro Seite (Manuell):**  
+   Interaktiver Paarungs-Editor zum freien Zusammenstellen von jeweils zwei Schützen (oder nicht vorbefüllten Zetteln) pro Seite mit der **gleichen Schießhälfte**:
+   - **🔄 Nach Scheibe (1+2, 3+4) füllen:** Übernimmt die automatische Gruppen-/Scheibenpaarung als Ausgangsbasis in den Editor.
+   - **+ Paar hinzufügen:** Fügt weitere Seitenpaare hinzu (jeder Platz kann mit einem beliebigen Schützen oder der Option *📄 Nicht vorbefüllter Zettel (Leer)* belegt werden).
+   - **Komfort-Aktionen pro Paar:** Tauschen von Links und Rechts (`⇄`), Duplizieren (`⧉`) oder Entfernen (`✕`) einzelner Paare.
+   - **Übersicht noch nicht zugewiesener Schützen:** Ein Hinweisbanner zeigt in Echtzeit an, welche Schützen aktuell noch in keinem Paar enthalten sind, und erlaubt über **+ Restliche automatisch paaren** das sofortige Ergänzen aller offenen Teilnehmer.
 
 ### Druckmodi: Gesamt, pro Klasse, pro Verein, pro Gruppe
-Sie können wählen, wie die PDFs generiert werden sollen:
+Unter **2. Wie sollen die PDF-Dateien aufgeteilt werden?** wählen Sie die gewünschte Dateistruktur (verfügbar in den Layouts *1 Zettel pro Seite*, *2 Zettel pro Seite* sowie *2 Schützen pro Seite – Scheibe 1+2, 3+4*):
 1. **📚 Gesamt:** Ein einziges zusammenhängendes PDF mit allen Schützen (ideal für den schnellen Komplettdruck).
 2. **🏷️ Pro Klasse:** Erzeugt für jede Klasse ein separates PDF (z. B. *Schüler_III.pdf*, *Herren.pdf*).
 3. **🛡️ Pro Verein:** Erzeugt pro Gastverein ein PDF (ideal, um Vereinen ihre gesammelten Zettel bei der Anmeldung auszuhändigen).
 4. **👥 Pro Gruppe:** Erzeugt PDFs sortiert nach Durchgang / Gruppe (ideal für die Schießleitung an den Ständen).
 
 > [!TIP]
-> **ZIP-Download:** Bei den Modi *Pro Klasse*, *Pro Verein* und *Pro Gruppe* können Sie alle Teildateien mit einem Klick als gebündeltes **ZIP-Archiv** herunterladen.
+> **ZIP-Download:** Bei den Modi *Pro Klasse*, *Pro Verein* und *Pro Gruppe* können Sie alle Teildateien mit einem Klick über **📦 Alle PDFs gebündelt als ZIP-Archiv (.zip) herunterladen** beziehen.
+
+### Zettel-Hälften & Entfernungsvorwahl
+Zusätzlich können Sie im PDF-Generator festlegen:
+- **Zettel-Hälften:** *Beide Hälften (Zettel A + B)*, *Nur 1. Hälfte (Zettel A · Passe 1–5)* oder *Nur 2. Hälfte (Zettel B · Passe 6–10)*.
+- **Entfernung auf Zettel:** *Automatisch (7 m / 5 m je nach Klasse)*, *Alle auf 7 m vorbefüllen* oder *Alle auf 5 m vorbefüllen*.
 
 ### Leere Schießzettel als Reserve
-Über den Button **📄 Leere Vorlage (ohne Namen)** im PDF-Dialog erhalten Sie neutrale Wertungsbögen ohne Namensaufdruck für spontane Nachmelder oder Probeschüsse.
+Am unteren Rand des PDF-Dialogs stehen zwei Direkt-Buttons für neutrale Wertungsbögen (ohne Namensaufdruck für spontane Nachmelder oder Probeschüsse) bereit:
+- **📄 Leere Vorlage (1 pro Seite):** Klassischer leerer Ergebniszettel groß auf DIN A4.
+- **📑 Leere Vorlage (2 auf 1 Seite):** Zwei leere Ergebniszettel (1. Hälfte A links + 2. Hälfte B rechts) nebeneinander auf einer DIN A4 Seite.
 
 ---
 
@@ -470,10 +513,11 @@ Ein Klick auf **📊 Excel-Datei (.xlsx)** generiert eine fertige Arbeitsmappe:
 Alle Daten (Wettkämpfe, Klassen, Schützen, Pfeilwerte und Zeitstempel) werden in einer einzigen lokalen SQLite-Datenbankdatei gespeichert:
 ```
 bgScore/
-└── bgscore.db
+└── bgscore.db   (bzw. im selben Ordner neben bgScore.exe)
 ```
-- **Datensicherung:** Um ein Backup Ihres gesamten Wettkampfs anzulegen, kopieren Sie einfach die Datei `bgscore.db` auf einen USB-Stick oder in die Cloud.
-- **Neues System aufsetzen:** Durch Kopieren der `bgscore.db` auf einen neuen Rechner nehmen Sie alle Daten 1:1 mit.
+- **Vollständige Datensicherung (`bgscore.db`):** Um ein Backup aller Wettkämpfe inklusive sämtlicher geschossener Ergebnisse anzulegen, kopieren Sie einfach die Datei `bgscore.db` auf einen USB-Stick oder in ein Backup-Verzeichnis. Bei Nutzung der eigenständigen `bgScore.exe` liegt `bgscore.db` immer direkt im selben Verzeichnis wie die `.exe`-Datei.
+- **Turnier-Backup als JSON:** Zusätzlich können Sie im Reiter **⚙️ Wettkampf & Klassen** über **📋 Aktives Turnier exportieren (.json)** jederzeit die Stammdaten (Turniername, Datum, Klassen und Schützenliste mit Gruppe/Scheibe) als portables `.json`-Archiv sichern.
+- **Neues System aufsetzen:** Durch Kopieren der `bgscore.db` (oder der gesamten portablen `bgScore.exe` samt `bgscore.db`) auf einen neuen Rechner nehmen Sie alle Daten 1:1 mit.
 
 ---
 
