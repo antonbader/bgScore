@@ -1,7 +1,8 @@
 import io
 import os
+import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -11,6 +12,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 import qr_codec
+
+A4_LANDSCAPE = (297.0 * mm, 210.0 * mm)
 
 _FONTS_REGISTERED = False
 FONT_REGULAR = "Helvetica"
@@ -314,7 +317,7 @@ def _draw_qr_code_vector(
                 c.rect(x_pt, y_pt, u_pt + eps, u_pt + eps, stroke=0, fill=1)
 
 
-def draw_scorecard_page(
+def _draw_scorecard_content(
     c: canvas.Canvas,
     half: int = 1,
     competition_name: str = "",
@@ -330,13 +333,8 @@ def draw_scorecard_page(
     is_blank_template: bool = False,
 ) -> None:
     """
-    Draws one full A4 scorecard page (half=1 -> Zettel A, half=2 -> Zettel B) onto the ReportLab canvas.
-    Header fields:
-      Left column:  Wettbewerb, Name, Vorname, Verein, Gruppe
-      Right column: Datum, Klasse, Entfernung (7 m / 5 m), Standnummer
-      Top-Right (when not blank): QR-Code encoding all header fields + half
-    The 5 Passe boxes are positioned at the exact FULL_PAGE_GRID_AREA coordinates
-    so camera/photo evaluation works with 100% accuracy.
+    Draws the content of one scorecard (in a 210 x 297 mm coordinate system) onto the canvas
+    without calling showPage(). Can be used for a full A4 page or scaled into half of an A4 page.
     """
     _ensure_fonts()
     PAGE_W = 210.0
@@ -592,16 +590,257 @@ def draw_scorecard_page(
         c.drawString((x3 + 1.0) * mm, (PAGE_H - tot_label_y) * mm, "Endergebnis")
         _draw_double_box(c, x3, tot_box_y_top, b_w, tot_box_h)
 
+
+def draw_scorecard_page(
+    c: canvas.Canvas,
+    half: int = 1,
+    competition_name: str = "",
+    shooter_name: str = "",
+    club: str = "",
+    date_str: str = "",
+    class_name: str = "",
+    distance: str = "",
+    group_name: str = "",
+    stand_number: str = "",
+    shooter_id: Optional[int] = None,
+    competition_id: Optional[int] = None,
+    is_blank_template: bool = False,
+) -> None:
+    """
+    Draws one full A4 scorecard page (half=1 -> Zettel A, half=2 -> Zettel B) onto the ReportLab canvas.
+    """
+    c.setPageSize(A4)
+    _draw_scorecard_content(
+        c,
+        half=half,
+        competition_name=competition_name,
+        shooter_name=shooter_name,
+        club=club,
+        date_str=date_str,
+        class_name=class_name,
+        distance=distance,
+        group_name=group_name,
+        stand_number=stand_number,
+        shooter_id=shooter_id,
+        competition_id=competition_id,
+        is_blank_template=is_blank_template,
+    )
     c.showPage()
 
 
-def generate_blank_template_pdf_bytes() -> bytes:
-    """Generates the blank 2-page PDF template (Sheet A and Sheet B) with Gruppe and Standnummer."""
+def draw_two_scorecards_page(
+    c: canvas.Canvas,
+    left_card: Optional[Dict[str, Any]],
+    right_card: Optional[Dict[str, Any]],
+    draw_cut_line: bool = True,
+) -> None:
+    """
+    Draws two scorecards side-by-side (each Din A5 portrait: 148.5 mm x 210 mm)
+    onto one Din A4 landscape page (297 mm x 210 mm).
+    Preserves 100% exact aspect ratio (scale = 210 / 297) so camera evaluation
+    and QR code scanning work identically to full A4 sheets.
+    """
+    _ensure_fonts()
+    c.setPageSize(A4_LANDSCAPE)
+    scale = 210.0 / 297.0
+    slot_w_mm = 148.5
+    rendered_w_mm = 210.0 * scale
+    x_pad_mm = (slot_w_mm - rendered_w_mm) * 0.5
+
+    if left_card is not None:
+        c.saveState()
+        c.translate(x_pad_mm * mm, 0)
+        c.scale(scale, scale)
+        _draw_scorecard_content(c, **left_card)
+        c.restoreState()
+
+    if right_card is not None:
+        c.saveState()
+        c.translate((slot_w_mm + x_pad_mm) * mm, 0)
+        c.scale(scale, scale)
+        _draw_scorecard_content(c, **right_card)
+        c.restoreState()
+
+    if draw_cut_line:
+        c.saveState()
+        c.setStrokeColor(colors.HexColor("#94A3B8"))
+        c.setLineWidth(0.5)
+        c.setDash(4, 4)
+        c.line(slot_w_mm * mm, 4.0 * mm, slot_w_mm * mm, 206.0 * mm)
+        c.restoreState()
+
+    c.showPage()
+
+
+def _natural_sort_key_pdf(val: str) -> Tuple:
+    s = (val or "").strip()
+    if not s:
+        return (1, 999999, "")
+    parts = re.split(r"(\d+)", s.lower())
+    converted = [int(p) if p.isdigit() else p for p in parts]
+    first_num = next((int(p) for p in parts if p.isdigit()), 999999)
+    return (0, first_num, converted)
+
+
+def _parse_stand_int(val: Any) -> Optional[int]:
+    s = str(val or "").strip()
+    if not s:
+        return None
+    m = re.search(r"\d+", s)
+    if m:
+        num = int(m.group(0))
+        if num >= 1:
+            return num
+    return None
+
+
+def build_adjacent_shooter_pairs(
+    shooters: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Pairs shooters within each group by adjacent targets (Scheibe 1+2, Scheibe 3+4, Scheibe 5+6, ...).
+    If a target in a pair has no shooter assigned, None is placed in that slot so a non-prefilled
+    scorecard will be generated for that target.
+    Shooters without a numeric target/stand number are paired consecutively within their group.
+    """
+    grp_buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for s in shooters:
+        g_val = (s.get("group_name") or "").strip()
+        key = g_val if g_val else "__empty__"
+        grp_buckets.setdefault(key, []).append(s)
+
+    sorted_group_keys = sorted(
+        grp_buckets.keys(),
+        key=lambda k: (1, 999999, "") if k == "__empty__" else _natural_sort_key_pdf(k),
+    )
+
+    pairs: List[Dict[str, Any]] = []
+    for g_key in sorted_group_keys:
+        grp_label = "" if g_key == "__empty__" else g_key
+        grp_shooters = grp_buckets[g_key]
+
+        by_stand: Dict[int, List[Dict[str, Any]]] = {}
+        no_stand: List[Dict[str, Any]] = []
+        for s in grp_shooters:
+            st_num = _parse_stand_int(s.get("stand_number"))
+            if st_num is not None:
+                by_stand.setdefault(st_num, []).append(s)
+            else:
+                no_stand.append(s)
+
+        for st_num in by_stand:
+            by_stand[st_num].sort(
+                key=lambda x: (
+                    (x.get("last_name") or "").lower(),
+                    (x.get("first_name") or "").lower(),
+                    x.get("id") or 0,
+                )
+            )
+        no_stand.sort(
+            key=lambda x: (
+                (x.get("last_name") or "").lower(),
+                (x.get("first_name") or "").lower(),
+                x.get("id") or 0,
+            )
+        )
+
+        pair_indices = sorted({(st - 1) // 2 for st in by_stand.keys()})
+        for k in pair_indices:
+            odd_stand = 2 * k + 1
+            even_stand = 2 * k + 2
+            odd_list = list(by_stand.get(odd_stand, []))
+            even_list = list(by_stand.get(even_stand, []))
+            while odd_list or even_list:
+                s_left = odd_list.pop(0) if odd_list else None
+                s_right = even_list.pop(0) if even_list else None
+                pairs.append(
+                    {
+                        "group_name": grp_label,
+                        "left_stand": str(odd_stand),
+                        "right_stand": str(even_stand),
+                        "left_shooter": s_left,
+                        "right_shooter": s_right,
+                    }
+                )
+
+        for idx in range(0, len(no_stand), 2):
+            s_left = no_stand[idx]
+            s_right = no_stand[idx + 1] if (idx + 1) < len(no_stand) else None
+            pairs.append(
+                {
+                    "group_name": grp_label,
+                    "left_stand": str(s_left.get("stand_number") or ""),
+                    "right_stand": str(s_right.get("stand_number") or "") if s_right else "",
+                    "left_shooter": s_left,
+                    "right_shooter": s_right,
+                }
+            )
+
+    return pairs
+
+
+def _make_shooter_card_spec(
+    shooter: Optional[Dict[str, Any]],
+    half: int,
+    competition: Dict[str, Any],
+    override_distance: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Builds the keyword-argument dictionary for _draw_scorecard_content for a shooter or a blank card."""
+    if shooter is None:
+        return {
+            "half": half,
+            "is_blank_template": True,
+        }
+    comp_name = (competition.get("name") or "").strip()
+    comp_date = (competition.get("date") or "").strip()
+    comp_dist = (competition.get("distance") or "").strip()
+    comp_id = competition.get("id")
+
+    last_name = (shooter.get("last_name") or "").strip()
+    first_name = (shooter.get("first_name") or "").strip()
+    full_name = f"{last_name}, {first_name}" if (last_name and first_name) else (last_name or first_name)
+    club = (shooter.get("club") or "").strip()
+    class_name = (shooter.get("class_name") or "").strip()
+    group_name = (shooter.get("group_name") or "").strip()
+    stand_number = str(shooter.get("stand_number") or "").strip()
+    dist = resolve_distance(class_name, comp_dist, override_distance or "")
+    sid = shooter.get("id")
+
+    return {
+        "half": half,
+        "competition_name": comp_name,
+        "shooter_name": full_name,
+        "club": club,
+        "date_str": comp_date,
+        "class_name": class_name,
+        "distance": dist,
+        "group_name": group_name,
+        "stand_number": stand_number,
+        "shooter_id": sid,
+        "competition_id": comp_id,
+        "is_blank_template": False,
+    }
+
+
+def generate_blank_template_pdf_bytes(per_page: int = 1) -> bytes:
+    """
+    Generates the blank PDF template (Sheet A and Sheet B).
+    If per_page == 2, both Sheet A and Sheet B are placed side-by-side on 1 Din A4 page.
+    """
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    c.setTitle("Blasrohr - Ergebniszettel (A & B)")
-    draw_scorecard_page(c, half=1, is_blank_template=True)
-    draw_scorecard_page(c, half=2, is_blank_template=True)
+    if int(per_page) == 2:
+        c = canvas.Canvas(buf, pagesize=A4_LANDSCAPE)
+        c.setTitle("Blasrohr - Ergebniszettel (A & B - 2 auf 1 Seite)")
+        draw_two_scorecards_page(
+            c,
+            left_card={"half": 1, "is_blank_template": True},
+            right_card={"half": 2, "is_blank_template": True},
+        )
+    else:
+        c = canvas.Canvas(buf, pagesize=A4)
+        c.setTitle("Blasrohr - Ergebniszettel (A & B)")
+        draw_scorecard_page(c, half=1, is_blank_template=True)
+        draw_scorecard_page(c, half=2, is_blank_template=True)
     c.save()
     return buf.getvalue()
 
@@ -611,60 +850,135 @@ def generate_prefilled_scorecards_pdf_bytes(
     competition: Dict[str, Any],
     halves: Sequence[int] = (1, 2),
     override_distance: Optional[str] = None,
+    per_page: int = 1,
+    pair_mode: str = "same_shooter",
+    manual_pairs: Optional[Sequence[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]]] = None,
 ) -> bytes:
     """
     Generates a multi-page PDF containing pre-filled scorecards for the given shooters.
-    For each shooter, renders the requested halves (default: Page 1 = Zettel A, Page 2 = Zettel B).
+    Supports:
+      - per_page=1: 1 scorecard per Din A4 portrait page
+      - per_page=2 & pair_mode='same_shooter': 2 scorecards per Din A4 page (e.g. Half A + Half B of 1 shooter)
+      - per_page=2 & pair_mode='adjacent': 2 adjacent shooters per Din A4 page (Scheibe 1+2, 3+4, ...)
+        with the same shooting half on each page; missing targets get a non-prefilled scorecard.
+      - per_page=2 & pair_mode='manual': 2 manually paired shooters per Din A4 page
+        with the same shooting half on each page; empty slots get a non-prefilled scorecard.
     """
+    pm = (pair_mode or "same_shooter").strip().lower()
+    use_two_per_page = int(per_page) == 2 or pm in ("adjacent", "2_shooters_auto", "manual", "2_shooters_manual")
+
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=A4_LANDSCAPE if use_two_per_page else A4)
     comp_name = (competition.get("name") or "").strip()
     comp_date = (competition.get("date") or "").strip()
     comp_dist = (competition.get("distance") or "").strip()
     c.setTitle(f"Blasrohr - Ergebniszettel - {comp_name}")
 
     comp_id = competition.get("id")
-    if not shooters:
-        for h in halves:
-            draw_scorecard_page(
-                c,
-                half=h,
-                competition_name=comp_name,
-                date_str=comp_date,
-                distance=resolve_distance("", comp_dist, override_distance or ""),
-                competition_id=comp_id,
-                is_blank_template=False,
-            )
+
+    if not use_two_per_page:
+        if not shooters:
+            for h in halves:
+                draw_scorecard_page(
+                    c,
+                    half=h,
+                    competition_name=comp_name,
+                    date_str=comp_date,
+                    distance=resolve_distance("", comp_dist, override_distance or ""),
+                    competition_id=comp_id,
+                    is_blank_template=False,
+                )
+            c.save()
+            return buf.getvalue()
+
+        for s in shooters:
+            for h in halves:
+                spec = _make_shooter_card_spec(s, h, competition, override_distance)
+                draw_scorecard_page(c, **spec)
+
         c.save()
         return buf.getvalue()
 
-    for s in shooters:
-        last_name = (s.get("last_name") or "").strip()
-        first_name = (s.get("first_name") or "").strip()
-        full_name = f"{last_name}, {first_name}" if (last_name and first_name) else (last_name or first_name)
-        club = (s.get("club") or "").strip()
-        class_name = (s.get("class_name") or "").strip()
-        group_name = (s.get("group_name") or "").strip()
-        stand_number = str(s.get("stand_number") or "").strip()
-        dist = resolve_distance(class_name, comp_dist, override_distance or "")
-        sid = s.get("id")
+    # --- 2 Scorecards per Din A4 page ---
+    if pm in ("manual", "2_shooters_manual"):
+        pairs_list: List[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]] = []
+        if manual_pairs:
+            pairs_list = list(manual_pairs)
+        elif shooters:
+            pairs_list = [(p["left_shooter"], p["right_shooter"]) for p in build_adjacent_shooter_pairs(shooters)]
 
-        for h in halves:
-            draw_scorecard_page(
-                c,
-                half=h,
-                competition_name=comp_name,
-                shooter_name=full_name,
-                club=club,
-                date_str=comp_date,
-                class_name=class_name,
-                distance=dist,
-                group_name=group_name,
-                stand_number=stand_number,
-                shooter_id=sid,
-                competition_id=comp_id,
-                is_blank_template=False,
+        if not pairs_list:
+            for h in halves:
+                blank_spec = _make_shooter_card_spec(None, h, competition, override_distance)
+                draw_two_scorecards_page(c, blank_spec, blank_spec)
+        else:
+            for s_left, s_right in pairs_list:
+                for h in halves:
+                    left_spec = _make_shooter_card_spec(s_left, h, competition, override_distance)
+                    right_spec = _make_shooter_card_spec(s_right, h, competition, override_distance)
+                    draw_two_scorecards_page(c, left_spec, right_spec)
+
+        c.save()
+        return buf.getvalue()
+
+    if pm in ("adjacent", "2_shooters_auto"):
+        adj_pairs = build_adjacent_shooter_pairs(shooters)
+        if not adj_pairs:
+            for h in halves:
+                blank_spec = _make_shooter_card_spec(None, h, competition, override_distance)
+                draw_two_scorecards_page(c, blank_spec, blank_spec)
+        else:
+            for p_entry in adj_pairs:
+                s_left = p_entry["left_shooter"]
+                s_right = p_entry["right_shooter"]
+                for h in halves:
+                    left_spec = _make_shooter_card_spec(s_left, h, competition, override_distance)
+                    right_spec = _make_shooter_card_spec(s_right, h, competition, override_distance)
+                    draw_two_scorecards_page(c, left_spec, right_spec)
+
+        c.save()
+        return buf.getvalue()
+
+    # Default 2-per-page mode: 'same_shooter' (e.g. Half A and Half B of each shooter on 1 Din A4 page)
+    if not shooters:
+        comp_cards = [
+            {
+                "half": h,
+                "competition_name": comp_name,
+                "date_str": comp_date,
+                "distance": resolve_distance("", comp_dist, override_distance or ""),
+                "competition_id": comp_id,
+                "is_blank_template": False,
+            }
+            for h in halves
+        ]
+        if len(comp_cards) == 1:
+            draw_two_scorecards_page(c, comp_cards[0], comp_cards[0])
+        else:
+            for idx in range(0, len(comp_cards), 2):
+                c1 = comp_cards[idx]
+                c2 = comp_cards[idx + 1] if (idx + 1) < len(comp_cards) else {"half": c1["half"], "is_blank_template": True}
+                draw_two_scorecards_page(c, c1, c2)
+        c.save()
+        return buf.getvalue()
+
+    if len(halves) >= 2:
+        for s in shooters:
+            left_spec = _make_shooter_card_spec(s, halves[0], competition, override_distance)
+            right_spec = _make_shooter_card_spec(s, halves[1], competition, override_distance)
+            draw_two_scorecards_page(c, left_spec, right_spec)
+    else:
+        only_half = halves[0] if halves else 1
+        all_specs = [_make_shooter_card_spec(s, only_half, competition, override_distance) for s in shooters]
+        for idx in range(0, len(all_specs), 2):
+            left_spec = all_specs[idx]
+            right_spec = (
+                all_specs[idx + 1]
+                if (idx + 1) < len(all_specs)
+                else _make_shooter_card_spec(None, only_half, competition, override_distance)
             )
+            draw_two_scorecards_page(c, left_spec, right_spec)
 
     c.save()
     return buf.getvalue()
+

@@ -735,7 +735,7 @@
 
     <!-- Pre-filled Scorecard PDF Generator Modal -->
     <div id="scorecardPdfModal" class="modal-backdrop hidden">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-header">
                 <h3>📄 Vorbefüllte Schießzettel (PDF) generieren</h3>
                 <button type="button" class="modal-close" onclick="closeScorecardPdfModal()">✕</button>
@@ -744,9 +744,32 @@
                 Erstellt druckfertige Schießzettel, in denen die Felder <strong>Wettbewerb, Name, Vorname, Verein, Datum, Klasse, Entfernung, Gruppe</strong> und <strong>Standnummer</strong> oben bereits vorbefüllt sind – inklusive <strong>QR-Code</strong> (mit allen Kopffeldern &amp; Zettel-Hälfte A/B) zur vollautomatischen Erkennung bei der Foto-Auswertung.
             </p>
 
-            <!-- 1. Mode Selection: Gesamt, Pro Klasse, Pro Verein, Pro Gruppe -->
+            <!-- 1. Page Layout Selection (1 per A4, 2 per A4 same shooter, 2 shooters auto by target, 2 shooters manual) -->
             <div class="form-group">
-                <label>1. Wie sollen die PDFs erstellt werden?</label>
+                <label>1. Seitenlayout &amp; Schützen-Anordnung auf DIN A4:</label>
+                <div class="pdf-mode-grid">
+                    <button type="button" class="pdf-mode-btn active" id="pdfLayoutBtn-1_per_page" onclick="selectPdfPageLayout('1_per_page')">
+                        <strong>📄 1 Zettel pro DIN A4 Seite</strong>
+                        <small>Klassisch: 1 Schießzettel groß pro Seite (Hochformat)</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfLayoutBtn-2_per_page" onclick="selectPdfPageLayout('2_per_page')">
+                        <strong>📑 2 Zettel auf eine DIN A4 Seite</strong>
+                        <small>Je Schütze Zettel A + B nebeneinander auf 1 Seite</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfLayoutBtn-2_shooters_auto" onclick="selectPdfPageLayout('2_shooters_auto')">
+                        <strong>👥 2 Schützen pro Seite (Scheibe 1+2, 3+4…)</strong>
+                        <small>Gleiche Schießhälfte · Nachbarn einer Gruppe (freie Scheibe = leerer Zettel)</small>
+                    </button>
+                    <button type="button" class="pdf-mode-btn" id="pdfLayoutBtn-2_shooters_manual" onclick="selectPdfPageLayout('2_shooters_manual')">
+                        <strong>🛠️ 2 Schützen pro Seite (Manuell)</strong>
+                        <small>Gleiche Schießhälfte · Jeweils 2 Schützen frei zusammenstellen</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2. Mode Selection: Gesamt, Pro Klasse, Pro Verein, Pro Gruppe -->
+            <div class="form-group mt-2" id="pdfGroupingSection">
+                <label>2. Wie sollen die PDF-Dateien aufgeteilt werden?</label>
                 <div class="pdf-mode-grid">
                     <button type="button" class="pdf-mode-btn active" id="pdfModeBtn-all" onclick="selectPdfGroupMode('all')">
                         <strong>📚 Gesamt</strong>
@@ -767,11 +790,11 @@
                 </div>
             </div>
 
-            <!-- 2. Half & Distance Options -->
+            <!-- 3. Half & Distance Options -->
             <div class="form-row mt-2">
                 <div class="form-group">
                     <label for="pdfHalfSelect">Zettel-Hälften</label>
-                    <select id="pdfHalfSelect" class="form-control">
+                    <select id="pdfHalfSelect" class="form-control" onchange="renderPdfPreviewList()">
                         <option value="both">Beide Hälften (Zettel A + B)</option>
                         <option value="1">Nur 1. Hälfte (Zettel A · Passe 1–5)</option>
                         <option value="2">Nur 2. Hälfte (Zettel B · Passe 6–10)</option>
@@ -787,13 +810,41 @@
                 </div>
             </div>
 
-            <!-- 3. Preview List of Resulting PDFs -->
-            <div class="form-group mt-2">
+            <!-- Automatic Adjacent Target Pairing Preview (shown when 2_shooters_auto is selected) -->
+            <div class="form-group mt-2 hidden" id="pdfAutoPairsPreviewSection">
+                <div class="pdf-pairs-header">
+                    <label style="margin-bottom: 0;">🔗 Automatische Paarung nach Gruppe &amp; Scheibe (1+2, 3+4, …):</label>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="openManualPairsFromAuto()">
+                        ✏️ Paarungen manuell anpassen
+                    </button>
+                </div>
+                <div id="pdfAutoPairsListContainer" class="pdf-preview-list"></div>
+            </div>
+
+            <!-- Manual 2-Shooters Pairing Builder (shown when 2_shooters_manual is selected) -->
+            <div class="form-group mt-2 hidden" id="pdfManualPairsSection">
+                <div class="pdf-pairs-header">
+                    <label style="margin-bottom: 0;">🛠️ Manuelle Zusammenstellung (je 2 Schützen pro Seite · gleiche Hälfte):</label>
+                    <div class="pdf-pairs-toolbar">
+                        <button type="button" class="btn btn-outline btn-sm" onclick="populateManualPairsFromAuto()" title="Paare automatisch nach Gruppe und benachbarter Scheibe (1+2, 3+4…) füllen">
+                            🔄 Nach Scheibe (1+2, 3+4) füllen
+                        </button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="addManualShooterPair()">
+                            + Paar hinzufügen
+                        </button>
+                    </div>
+                </div>
+                <div id="pdfManualUnassignedBar" class="pdf-unassigned-bar hidden"></div>
+                <div id="pdfManualPairsContainer" class="pdf-manual-pairs-list"></div>
+            </div>
+
+            <!-- 4. Preview List of Resulting PDFs -->
+            <div class="form-group mt-2" id="pdfPreviewListSection">
                 <label id="pdfPreviewListTitle">Zu erstellende PDF-Dateien:</label>
                 <div id="pdfPreviewListContainer" class="pdf-preview-list"></div>
             </div>
 
-            <!-- 4. Primary Action Buttons -->
+            <!-- 5. Primary Action Buttons -->
             <div class="pdf-modal-actions" id="pdfModalMainActions">
                 <button type="button" class="btn btn-primary btn-block" id="btnDownloadAllPdfs" onclick="triggerPrimaryPdfDownload()">
                     📥 Gesamt-PDF herunterladen
@@ -803,10 +854,15 @@
                 </button>
             </div>
 
-            <div class="modal-footer" style="justify-content: space-between; margin-top: 14px;">
-                <a href="/api/template-pdf" class="btn btn-outline btn-sm" title="Leeren Ergebniszettel ohne Vorbefüllung herunterladen">
-                    📄 Leere Vorlage (ohne Namen)
-                </a>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 14px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <a href="/api/template-pdf?per_page=1" class="btn btn-outline btn-sm" title="Leeren Ergebniszettel (1 Zettel pro DIN A4 Seite) ohne Vorbefüllung herunterladen">
+                        📄 Leere Vorlage (1 pro Seite)
+                    </a>
+                    <a href="/api/template-pdf?per_page=2" class="btn btn-outline btn-sm" title="Leeren Ergebniszettel (2 Zettel A+B auf 1 DIN A4 Seite) ohne Vorbefüllung herunterladen">
+                        📑 Leere Vorlage (2 auf 1 Seite)
+                    </a>
+                </div>
                 <button type="button" class="btn btn-ghost" onclick="closeScorecardPdfModal()">Schließen</button>
             </div>
         </div>
