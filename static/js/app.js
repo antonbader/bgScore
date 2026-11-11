@@ -1522,15 +1522,20 @@ function closeQrModal() {
 }
 
 // =========================================================================
-// Pre-filled Scorecard PDF Generator Modal (Gesamt, Klasse, Verein, Gruppe)
+// Pre-filled Scorecard PDF Generator Modal (Gesamt, Klasse, Verein, Gruppe & 2-auf-1 Layouts)
 // =========================================================================
+let currentPdfPageLayout = "1_per_page"; // '1_per_page' | '2_per_page' | '2_shooters_auto' | '2_shooters_manual'
 let currentPdfGroupMode = "all";
 let currentPdfGroupsData = {
     total_shooters: 0,
     by_class: [],
     by_club: [],
     by_group: [],
+    auto_pairs: [],
+    shooters: [],
 };
+let manualShooterPairs = [];
+let manualPairsCompetitionId = null;
 
 async function openScorecardPdfModal() {
     if (!state.activeCompetitionId) {
@@ -1546,11 +1551,70 @@ async function openScorecardPdfModal() {
     } catch (err) {
         // Fallback to local state if needed
     }
-    selectPdfGroupMode(currentPdfGroupMode);
+
+    if (manualPairsCompetitionId !== state.activeCompetitionId || manualShooterPairs.length === 0) {
+        _initManualPairsFromAutoData();
+        manualPairsCompetitionId = state.activeCompetitionId;
+    }
+
+    selectPdfPageLayout(currentPdfPageLayout);
 }
 
 function closeScorecardPdfModal() {
     document.getElementById("scorecardPdfModal").classList.add("hidden");
+}
+
+function _initManualPairsFromAutoData() {
+    const autoPairs = currentPdfGroupsData.auto_pairs || [];
+    if (autoPairs.length > 0) {
+        manualShooterPairs = autoPairs.map((p) => ({
+            leftId: p.left_shooter ? String(p.left_shooter.id) : "",
+            rightId: p.right_shooter ? String(p.right_shooter.id) : "",
+        }));
+    } else if (state.shooters && state.shooters.length > 0) {
+        manualShooterPairs = [];
+        for (let i = 0; i < state.shooters.length; i += 2) {
+            manualShooterPairs.push({
+                leftId: String(state.shooters[i].id),
+                rightId: state.shooters[i + 1] ? String(state.shooters[i + 1].id) : "",
+            });
+        }
+    } else {
+        manualShooterPairs = [{ leftId: "", rightId: "" }];
+    }
+}
+
+function selectPdfPageLayout(layout) {
+    currentPdfPageLayout = layout;
+    ["1_per_page", "2_per_page", "2_shooters_auto", "2_shooters_manual"].forEach((l) => {
+        const btn = document.getElementById(`pdfLayoutBtn-${l}`);
+        if (btn) btn.classList.toggle("active", l === layout);
+    });
+
+    const groupingSec = document.getElementById("pdfGroupingSection");
+    const autoPairsSec = document.getElementById("pdfAutoPairsPreviewSection");
+    const manualPairsSec = document.getElementById("pdfManualPairsSection");
+    const previewListSec = document.getElementById("pdfPreviewListSection");
+
+    const isManual = layout === "2_shooters_manual";
+    const isAutoPairs = layout === "2_shooters_auto";
+
+    if (groupingSec) groupingSec.classList.toggle("hidden", isManual);
+    if (autoPairsSec) autoPairsSec.classList.toggle("hidden", !isAutoPairs);
+    if (manualPairsSec) manualPairsSec.classList.toggle("hidden", !isManual);
+    if (previewListSec) previewListSec.classList.toggle("hidden", isManual);
+
+    if (isAutoPairs) {
+        renderAutoPairsPreview();
+    }
+    if (isManual) {
+        if (manualShooterPairs.length === 0) {
+            _initManualPairsFromAutoData();
+        }
+        renderManualPairsList();
+    }
+
+    renderPdfPreviewList();
 }
 
 function selectPdfGroupMode(mode) {
@@ -1562,11 +1626,292 @@ function selectPdfGroupMode(mode) {
     renderPdfPreviewList();
 }
 
+function _formatShooterOptionLabel(s) {
+    const name = s.name || `${s.last_name || ""}, ${s.first_name || ""}`.replace(/^,\s*|,\s*$/g, "");
+    const parts = [];
+    if (s.group_name) parts.push(`Gr. ${s.group_name}`);
+    if (s.stand_number) parts.push(`Scheibe ${s.stand_number}`);
+    if (s.class_name) parts.push(s.class_name);
+    if (s.club) parts.push(s.club);
+    return parts.length > 0 ? `${name} (${parts.join(" · ")})` : name;
+}
+
+function _getAvailableShootersForPdf() {
+    if (currentPdfGroupsData.shooters && currentPdfGroupsData.shooters.length > 0) {
+        return currentPdfGroupsData.shooters;
+    }
+    return state.shooters || [];
+}
+
+function renderAutoPairsPreview() {
+    const container = document.getElementById("pdfAutoPairsListContainer");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const autoPairs = currentPdfGroupsData.auto_pairs || [];
+    if (autoPairs.length === 0) {
+        container.innerHTML = `
+            <div class="pdf-preview-empty">
+                Noch keine Schützen angelegt – es wird ein nicht vorbefülltes Schießzettel-Paar erstellt.
+            </div>
+        `;
+        return;
+    }
+
+    autoPairs.forEach((p, idx) => {
+        const row = document.createElement("div");
+        row.className = "pdf-preview-item pdf-pair-preview-row";
+
+        const standLabel =
+            p.left_stand || p.right_stand
+                ? `Scheibe ${escapeHtml(p.left_stand || "?")} + ${escapeHtml(p.right_stand || "?")}`
+                : `Paar ${idx + 1}`;
+        const grpBadge = `<span class="pair-group-badge">${escapeHtml(p.group_name || "Ohne Gruppe")} · ${standLabel}</span>`;
+
+        const leftHtml = p.left_shooter
+            ? `<strong>${escapeHtml(p.left_shooter.name)}</strong> <small class="text-muted">(Sch. ${escapeHtml(p.left_shooter.stand_number || "–")})</small>`
+            : `<span class="pair-blank-badge">📄 Nicht vorbefüllt (Scheibe ${escapeHtml(p.left_stand || "–")})</span>`;
+
+        const rightHtml = p.right_shooter
+            ? `<strong>${escapeHtml(p.right_shooter.name)}</strong> <small class="text-muted">(Sch. ${escapeHtml(p.right_shooter.stand_number || "–")})</small>`
+            : `<span class="pair-blank-badge">📄 Nicht vorbefüllt (Scheibe ${escapeHtml(p.right_stand || "–")})</span>`;
+
+        const leftId = p.left_shooter ? String(p.left_shooter.id) : "0";
+        const rightId = p.right_shooter ? String(p.right_shooter.id) : "0";
+
+        row.innerHTML = `
+            <div class="pair-preview-info">
+                ${grpBadge}
+                <div class="pair-preview-names">
+                    <span class="pair-side-box">${leftHtml}</span>
+                    <span class="pair-plus-sep">+</span>
+                    <span class="pair-side-box">${rightHtml}</span>
+                </div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" title="PDF nur für dieses Schützen-Paar herunterladen">
+                📄 Paar-PDF
+            </button>
+        `;
+        const btn = row.querySelector("button");
+        btn.onclick = () => downloadSpecificPairsPdf(`${leftId}:${rightId}`);
+        container.appendChild(row);
+    });
+}
+
+function openManualPairsFromAuto() {
+    _initManualPairsFromAutoData();
+    selectPdfPageLayout("2_shooters_manual");
+    showToast("Automatische Paarungen wurden in die manuelle Bearbeitung übernommen.", "info");
+}
+
+function populateManualPairsFromAuto() {
+    _initManualPairsFromAutoData();
+    renderManualPairsList();
+    renderPdfPreviewList();
+    showToast("Paare nach Gruppe & benachbarter Scheibe (1+2, 3+4…) zusammengestellt.", "success");
+}
+
+function addManualShooterPair(leftId = "", rightId = "") {
+    manualShooterPairs.push({ leftId: String(leftId || ""), rightId: String(rightId || "") });
+    renderManualPairsList();
+    renderPdfPreviewList();
+    const container = document.getElementById("pdfManualPairsContainer");
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function removeManualShooterPair(index) {
+    if (manualShooterPairs.length <= 1) {
+        manualShooterPairs[0] = { leftId: "", rightId: "" };
+    } else {
+        manualShooterPairs.splice(index, 1);
+    }
+    renderManualPairsList();
+    renderPdfPreviewList();
+}
+
+function swapManualShooterPair(index) {
+    const pair = manualShooterPairs[index];
+    if (!pair) return;
+    const tmp = pair.leftId;
+    pair.leftId = pair.rightId;
+    pair.rightId = tmp;
+    renderManualPairsList();
+}
+
+function updateManualShooterPairSide(index, side, value) {
+    if (!manualShooterPairs[index]) return;
+    if (side === "left") {
+        manualShooterPairs[index].leftId = String(value || "");
+    } else {
+        manualShooterPairs[index].rightId = String(value || "");
+    }
+    _updateManualUnassignedBanner();
+    renderPdfPreviewList();
+}
+
+function appendUnassignedShootersToManualPairs() {
+    const shooters = _getAvailableShootersForPdf();
+    const usedIds = new Set();
+    manualShooterPairs.forEach((p) => {
+        if (p.leftId) usedIds.add(String(p.leftId));
+        if (p.rightId) usedIds.add(String(p.rightId));
+    });
+
+    const missing = shooters.filter((s) => !usedIds.has(String(s.id)));
+    if (missing.length === 0) return;
+
+    // Remove a single completely empty pair if that's the only one
+    if (manualShooterPairs.length === 1 && !manualShooterPairs[0].leftId && !manualShooterPairs[0].rightId) {
+        manualShooterPairs = [];
+    }
+
+    for (let i = 0; i < missing.length; i += 2) {
+        manualShooterPairs.push({
+            leftId: String(missing[i].id),
+            rightId: missing[i + 1] ? String(missing[i + 1].id) : "",
+        });
+    }
+    renderManualPairsList();
+    renderPdfPreviewList();
+    showToast(`${missing.length} noch nicht zugeordnete Schützen wurden als Paare ergänzt.`, "success");
+}
+
+function _updateManualUnassignedBanner() {
+    const bar = document.getElementById("pdfManualUnassignedBar");
+    if (!bar) return;
+
+    const shooters = _getAvailableShootersForPdf();
+    if (shooters.length === 0) {
+        bar.classList.add("hidden");
+        return;
+    }
+
+    const usedIds = new Set();
+    manualShooterPairs.forEach((p) => {
+        if (p.leftId) usedIds.add(String(p.leftId));
+        if (p.rightId) usedIds.add(String(p.rightId));
+    });
+
+    const unassigned = shooters.filter((s) => !usedIds.has(String(s.id)));
+    if (unassigned.length === 0) {
+        bar.className = "pdf-unassigned-bar all-assigned";
+        bar.innerHTML = `<span>✓ Alle ${shooters.length} Schützen des Wettkampfs sind in den Paaren enthalten.</span>`;
+        bar.classList.remove("hidden");
+        return;
+    }
+
+    const previewNames = unassigned
+        .slice(0, 4)
+        .map((s) => escapeHtml(s.name || `${s.last_name}, ${s.first_name}`))
+        .join(" · ");
+    const moreSuffix = unassigned.length > 4 ? ` (+${unassigned.length - 4} weitere)` : "";
+
+    bar.className = "pdf-unassigned-bar has-unassigned";
+    bar.innerHTML = `
+        <span>⚠️ Noch nicht zugeordnet (${unassigned.length}): <strong>${previewNames}${moreSuffix}</strong></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="appendUnassignedShootersToManualPairs()">
+            + Fehlende ergänzen
+        </button>
+    `;
+    bar.classList.remove("hidden");
+}
+
+function renderManualPairsList() {
+    const container = document.getElementById("pdfManualPairsContainer");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const shooters = _getAvailableShootersForPdf();
+    const buildOptionsHtml = (selectedVal) => {
+        let html = `<option value="" ${!selectedVal ? "selected" : ""}>📄 Nicht vorbefüllter Schießzettel (Leer)</option>`;
+        shooters.forEach((s) => {
+            const sid = String(s.id);
+            const isSel = sid === String(selectedVal) ? "selected" : "";
+            html += `<option value="${escapeHtml(sid)}" ${isSel}>${escapeHtml(_formatShooterOptionLabel(s))}</option>`;
+        });
+        return html;
+    };
+
+    manualShooterPairs.forEach((pair, idx) => {
+        const row = document.createElement("div");
+        row.className = "pdf-manual-pair-row";
+        row.innerHTML = `
+            <span class="manual-pair-index">Paar ${idx + 1}</span>
+            <select class="form-control form-control-sm manual-pair-select" data-side="left" aria-label="1. Schütze (Links)">
+                ${buildOptionsHtml(pair.leftId)}
+            </select>
+            <button type="button" class="btn btn-outline btn-sm manual-pair-swap" title="Linken und rechten Schützen tauschen">⇄</button>
+            <select class="form-control form-control-sm manual-pair-select" data-side="right" aria-label="2. Schütze (Rechts)">
+                ${buildOptionsHtml(pair.rightId)}
+            </select>
+            <button type="button" class="btn btn-outline btn-sm" title="PDF nur für dieses Paar herunterladen">📄</button>
+            <button type="button" class="btn-danger-sm" title="Dieses Paar entfernen">✕</button>
+        `;
+
+        const selects = row.querySelectorAll("select");
+        selects[0].onchange = (e) => updateManualShooterPairSide(idx, "left", e.target.value);
+        selects[1].onchange = (e) => updateManualShooterPairSide(idx, "right", e.target.value);
+
+        const buttons = row.querySelectorAll("button");
+        buttons[0].onclick = () => swapManualShooterPair(idx);
+        buttons[1].onclick = () => downloadSingleManualPairPdf(idx);
+        buttons[2].onclick = () => removeManualShooterPair(idx);
+
+        container.appendChild(row);
+    });
+
+    _updateManualUnassignedBanner();
+}
+
+function _serializeManualPairsParam(pairsArray) {
+    return (pairsArray || [])
+        .map((p) => `${p.leftId || "0"}:${p.rightId || "0"}`)
+        .join(",");
+}
+
+function downloadSingleManualPairPdf(index) {
+    const pair = manualShooterPairs[index];
+    if (!pair) return;
+    downloadSpecificPairsPdf(`${pair.leftId || "0"}:${pair.rightId || "0"}`);
+}
+
+function downloadSpecificPairsPdf(pairsParamStr) {
+    if (!state.activeCompetitionId) return;
+    const half = document.getElementById("pdfHalfSelect") ? document.getElementById("pdfHalfSelect").value : "both";
+    const dist = document.getElementById("pdfDistanceSelect") ? document.getElementById("pdfDistanceSelect").value : "";
+    const params = new URLSearchParams({
+        half,
+        per_page: "2",
+        pair_mode: "manual",
+        pairs: pairsParamStr,
+    });
+    if (dist) params.set("distance", dist);
+    const url = `/api/competitions/${state.activeCompetitionId}/scorecards.pdf?${params.toString()}`;
+    _triggerBrowserDownload(url);
+}
+
 function _getPdfOptionsQuery() {
     const half = document.getElementById("pdfHalfSelect") ? document.getElementById("pdfHalfSelect").value : "both";
     const dist = document.getElementById("pdfDistanceSelect") ? document.getElementById("pdfDistanceSelect").value : "";
     const params = new URLSearchParams({ half });
     if (dist) params.set("distance", dist);
+
+    if (currentPdfPageLayout === "2_per_page") {
+        params.set("per_page", "2");
+        params.set("pair_mode", "same_shooter");
+    } else if (currentPdfPageLayout === "2_shooters_auto") {
+        params.set("per_page", "2");
+        params.set("pair_mode", "adjacent");
+    } else if (currentPdfPageLayout === "2_shooters_manual") {
+        params.set("per_page", "2");
+        params.set("pair_mode", "manual");
+        params.set("pairs", _serializeManualPairsParam(manualShooterPairs));
+    } else {
+        params.set("per_page", "1");
+        params.set("pair_mode", "same_shooter");
+    }
     return params;
 }
 
@@ -1576,8 +1921,24 @@ function renderPdfPreviewList() {
     const zipBtn = document.getElementById("btnDownloadZipPdfs");
     if (!container || !mainBtn || !zipBtn) return;
 
+    if (currentPdfPageLayout === "2_shooters_manual") {
+        const pairCount = manualShooterPairs.length;
+        const halfVal = document.getElementById("pdfHalfSelect") ? document.getElementById("pdfHalfSelect").value : "both";
+        const pagesCount = halfVal === "both" ? pairCount * 2 : pairCount;
+        mainBtn.textContent = `📥 PDF für ${pairCount} zusammengestellte${pairCount === 1 ? "s Paar" : " Paare"} (${pagesCount} DIN A4 Seite${pagesCount === 1 ? "" : "n"}) herunterladen`;
+        zipBtn.classList.add("hidden");
+        return;
+    }
+
     container.innerHTML = "";
     const totalShooters = currentPdfGroupsData.total_shooters || state.shooters.length;
+
+    let layoutHint = "1 Zettel pro DIN A4 Seite";
+    if (currentPdfPageLayout === "2_per_page") {
+        layoutHint = "2 Zettel pro DIN A4 Seite (A+B nebeneinander)";
+    } else if (currentPdfPageLayout === "2_shooters_auto") {
+        layoutHint = "2 Schützen pro DIN A4 Seite (gleiche Hälfte · Scheibe 1+2, 3+4…)";
+    }
 
     if (totalShooters === 0) {
         container.innerHTML = `
@@ -1596,7 +1957,7 @@ function renderPdfPreviewList() {
         item.innerHTML = `
             <div>
                 <strong>Gesamt-PDF (Alle Schützen)</strong>
-                <span class="text-muted" style="font-size: 0.82rem; margin-left: 6px;">(${totalShooters} Schützen)</span>
+                <span class="text-muted" style="font-size: 0.82rem; margin-left: 6px;">(${totalShooters} Schützen · ${escapeHtml(layoutHint)})</span>
             </div>
             <button type="button" class="btn btn-outline btn-sm" onclick="downloadSingleScorecardPdf('all', '')">
                 📄 PDF
@@ -1667,12 +2028,13 @@ function downloadSingleScorecardPdf(mode, value) {
     _triggerBrowserDownload(url);
 }
 
-function downloadShooterScorecardPdf(shooterId) {
+function downloadShooterScorecardPdf(shooterId, perPage = 1) {
     if (!state.activeCompetitionId) return;
     const params = new URLSearchParams({
         mode: "shooter",
         value: String(shooterId),
         half: "both",
+        per_page: String(perPage),
     });
     const url = `/api/competitions/${state.activeCompetitionId}/scorecards.pdf?${params.toString()}`;
     _triggerBrowserDownload(url);
@@ -1680,6 +2042,13 @@ function downloadShooterScorecardPdf(shooterId) {
 
 function triggerPrimaryPdfDownload() {
     if (!state.activeCompetitionId) return;
+
+    if (currentPdfPageLayout === "2_shooters_manual") {
+        downloadSingleScorecardPdf("all", "");
+        showToast("PDF mit den manuell zusammengestellten Schützen-Paaren wird heruntergeladen…", "success");
+        return;
+    }
+
     if (currentPdfGroupMode === "all") {
         downloadSingleScorecardPdf("all", "");
         showToast("Gesamt-PDF mit vorbefüllten Schießzetteln wird heruntergeladen…", "success");

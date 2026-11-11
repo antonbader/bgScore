@@ -306,8 +306,15 @@ Die generierten PDFs enthalten im Kopfbereich bereits gestochen scharf:
 - **Kompakter QR-Code:** Beinhaltet alle Headerdaten und die Zettelhälfte (A oder B). Beim späteren Fotografieren liest die Software diese Daten aus – Verwechslungen sind ausgeschlossen!
 
 > [!TIP]
-> **Druck auf Din A5 (Papiersparmodus):**
-> Die Schießzettel sind so gestaltet, dass sie sowohl auf **Din A4** als auch auf **Din A5** (z. B. „2 Seiten pro Blatt“ oder direktes A5-Papier) gedruckt werden können. Der QR-Code wurde mit vergrößerter Abmessung (36,5 mm auf A4 / ca. 26 mm auf A5) und hochrobusten, großen Modulen gestaltet, sodass Smartphone- und Tabletkameras den Code auch bei A5-Skalierung, niedrigerer Auflösung oder leichter Unschärfe sofort und zuverlässig erfassen.
+> **Druck auf Din A5 / 2 Zettel pro DIN A4 Seite (Papiersparmodus):**
+> Die Schießzettel sind so gestaltet, dass sie sowohl einzeln auf **Din A4** als auch zu zweit nebeneinander (je **Din A5**) auf einer **Din A4 Seite** gedruckt werden können. Der QR-Code wurde mit vergrößerter Abmessung (36,5 mm auf A4 / ca. 26 mm auf A5) und hochrobusten, großen Modulen gestaltet, sodass Smartphone- und Tabletkameras den Code auch bei A5-Skalierung sofort und zuverlässig erfassen.
+
+### Seitenlayouts & 2-Schützen-Paarung auf DIN A4
+Im PDF-Generator können Sie unter **1. Seitenlayout & Schützen-Anordnung auf DIN A4** zwischen vier Layouts wählen:
+1. **📄 1 Zettel pro DIN A4 Seite:** Klassischer Einzeldruck (jeder Schießzettel groß im DIN A4 Hochformat).
+2. **📑 2 Zettel auf eine DIN A4 Seite:** Platziert pro Schütze die 1. Hälfte (Zettel A) links und die 2. Hälfte (Zettel B) rechts nebeneinander auf einer DIN A4 Seite (mit feiner Schnittlinie in der Mitte).
+3. **👥 2 Schützen pro Seite (Scheibe 1+2, 3+4…):** Druckt immer zwei benachbarte Schützen derselben Gruppe (Scheibe 1+2, Scheibe 3+4, Scheibe 5+6 usw.) mit der **gleichen Schießhälfte** zusammen auf eine DIN A4 Seite (Seite 1: beide Schützen 1. Hälfte A; Seite 2: beide Schützen 2. Hälfte B). Ist an einer benachbarten Scheibe kein Schütze eingeteilt, wird für diese Scheibe automatisch ein **nicht vorbefüllter Schießzettel** miterstellt.
+4. **🛠️ 2 Schützen pro Seite (Manuell):** Erlaubt das freie Zusammenstellen von jeweils zwei Schützen pro Seite (inklusive Tauschen Links/Rechts, Hinzufügen nicht vorbefüllter Zettel und Vorbefüllen aus der Scheiben-Zuordnung).
 
 ### Druckmodi: Gesamt, pro Klasse, pro Verein, pro Gruppe
 Sie können wählen, wie die PDFs generiert werden sollen:

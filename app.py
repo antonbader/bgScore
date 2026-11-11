@@ -49,6 +49,8 @@ app = Flask(
     template_folder=os.path.join(BUNDLE_DIR, "templates"),
 )
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB upload limit for high-res phone photos
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
 def get_ssl_cert_paths() -> Tuple[Optional[str], Optional[str]]:
@@ -80,8 +82,8 @@ def inject_asset_version():
 
 @app.after_request
 def add_cache_control_headers(response):
-    """Ensure API endpoints are not cached aggressively by mobile browsers or proxies."""
-    if request.path.startswith("/api/"):
+    """Ensure API endpoints and HTML/static assets are not cached stale by browsers."""
+    if request.path == "/" or request.path.startswith("/api/") or request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -1563,35 +1565,117 @@ def _group_shooters_for_pdf(shooters: List[Dict[str, Any]], mode: str) -> List[T
     return [("all", "Gesamt", all_sorted)]
 
 
+def _parse_manual_pairs_param(
+    pairs_raw: Any,
+    shooters: List[Dict[str, Any]],
+) -> List[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]]:
+    """
+    Parses manual pairs from either a query string ('12:15,18:0,0:21')
+    or a JSON array of [left_id, right_id] pairs.
+    """
+    shooter_map = {str(s["id"]): s for s in shooters}
+    out: List[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]] = []
+    if not pairs_raw:
+        return out
+
+    def _resolve_id(val: Any) -> Optional[Dict[str, Any]]:
+        if val is None:
+            return None
+        k = str(val).strip()
+        if not k or k.lower() in ("0", "blank", "none", "null", "empty", "-"):
+            return None
+        return shooter_map.get(k)
+
+    if isinstance(pairs_raw, list):
+        for item in pairs_raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                out.append((_resolve_id(item[0]), _resolve_id(item[1])))
+            elif isinstance(item, dict):
+                out.append((_resolve_id(item.get("left")), _resolve_id(item.get("right"))))
+        return out
+
+    s_raw = str(pairs_raw).strip()
+    for part in s_raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        sides = part.split(":", 1)
+        left_k = sides[0].strip()
+        right_k = sides[1].strip() if len(sides) > 1 else ""
+        out.append((_resolve_id(left_k), _resolve_id(right_k)))
+    return out
+
+
+def _serialize_shooter_for_pair(s: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not s:
+        return None
+    last_n = (s.get("last_name") or "").strip()
+    first_n = (s.get("first_name") or "").strip()
+    full_n = f"{last_n}, {first_n}" if (last_n and first_n) else (last_n or first_n)
+    return {
+        "id": s["id"],
+        "name": full_n,
+        "last_name": last_n,
+        "first_name": first_n,
+        "class_name": s.get("class_name") or "",
+        "club": s.get("club") or "",
+        "group_name": s.get("group_name") or "",
+        "stand_number": str(s.get("stand_number") or ""),
+    }
+
+
 @app.route("/api/template-pdf", methods=["GET"])
 def download_template_pdf():
-    pdf_bytes = scorecard_pdf.generate_blank_template_pdf_bytes()
+    per_page_arg = (request.args.get("per_page") or "1").strip()
+    per_page = 2 if per_page_arg == "2" else 1
+    pdf_bytes = scorecard_pdf.generate_blank_template_pdf_bytes(per_page=per_page)
+    fname = (
+        "Blasrohr_Ergebniszettel_Leer_A_und_B_2auf1.pdf"
+        if per_page == 2
+        else "Blasrohr_Ergebniszettel_Leer_A_und_B.pdf"
+    )
     return send_file(
         io.BytesIO(pdf_bytes),
         as_attachment=True,
-        download_name="Blasrohr_Ergebniszettel_Leer_A_und_B.pdf",
+        download_name=fname,
         mimetype="application/pdf",
     )
 
 
 @app.route("/api/competitions/<int:comp_id>/scorecards-groups", methods=["GET"])
 def get_scorecard_groups_summary(comp_id: int):
-    """Returns shooter counts grouped by Klasse, Verein, and Gruppe for the PDF generator modal."""
+    """Returns shooter counts grouped by Klasse, Verein, and Gruppe plus auto-pairs for the PDF generator modal."""
     shooters = _build_shooter_results(comp_id)
     by_class = [{"key": k, "label": lbl, "count": len(items)} for k, lbl, items in _group_shooters_for_pdf(shooters, "class")]
     by_club = [{"key": k, "label": lbl, "count": len(items)} for k, lbl, items in _group_shooters_for_pdf(shooters, "club")]
     by_group = [{"key": k, "label": lbl, "count": len(items)} for k, lbl, items in _group_shooters_for_pdf(shooters, "group")]
+
+    sorted_all = _group_shooters_for_pdf(shooters, "all")[0][2] if shooters else []
+    raw_auto_pairs = scorecard_pdf.build_adjacent_shooter_pairs(sorted_all)
+    auto_pairs = [
+        {
+            "group_name": p["group_name"] or "Ohne Gruppe",
+            "left_stand": p["left_stand"],
+            "right_stand": p["right_stand"],
+            "left_shooter": _serialize_shooter_for_pair(p["left_shooter"]),
+            "right_shooter": _serialize_shooter_for_pair(p["right_shooter"]),
+        }
+        for p in raw_auto_pairs
+    ]
+
     return jsonify(
         {
             "total_shooters": len(shooters),
             "by_class": by_class,
             "by_club": by_club,
             "by_group": by_group,
+            "auto_pairs": auto_pairs,
+            "shooters": [_serialize_shooter_for_pair(s) for s in sorted_all],
         }
     )
 
 
-@app.route("/api/competitions/<int:comp_id>/scorecards.pdf", methods=["GET"])
+@app.route("/api/competitions/<int:comp_id>/scorecards.pdf", methods=["GET", "POST"])
 def download_prefilled_scorecards_pdf(comp_id: int):
     """
     Generates a pre-filled PDF with Schießzettel (Wettbewerb, Name, Vorname, Verein,
@@ -1602,11 +1686,24 @@ def download_prefilled_scorecards_pdf(comp_id: int):
       - mode=club & value=<club_name or __empty__> (PDF für einen Verein)
       - mode=group & value=<group_name or __empty__> (PDF für eine Gruppe)
       - mode=shooter & value=<shooter_id> (PDF für einen einzelnen Schützen)
+      - per_page=1 or 2
+      - pair_mode=same_shooter | adjacent | manual
+      - pairs=<left_id>:<right_id>,... (when pair_mode=manual)
     """
-    mode = (request.args.get("mode") or "all").strip().lower()
-    value = request.args.get("value")
-    halves = _parse_halves_param(request.args.get("half") or "both")
-    override_distance = (request.args.get("distance") or "").strip() or None
+    body_data = request.get_json(silent=True) if request.is_json else {}
+    if not isinstance(body_data, dict):
+        body_data = {}
+
+    mode = (request.args.get("mode") or body_data.get("mode") or "all").strip().lower()
+    value = request.args.get("value") if "value" in request.args else body_data.get("value")
+    half_raw = request.args.get("half") or body_data.get("half") or "both"
+    halves = _parse_halves_param(str(half_raw))
+    override_distance = (request.args.get("distance") or body_data.get("distance") or "").strip() or None
+
+    per_page_raw = str(request.args.get("per_page") or body_data.get("per_page") or "1").strip()
+    per_page = 2 if per_page_raw == "2" else 1
+    pair_mode = str(request.args.get("pair_mode") or body_data.get("pair_mode") or "same_shooter").strip().lower()
+    pairs_param = request.args.get("pairs") if "pairs" in request.args else body_data.get("pairs")
 
     conn = get_db()
     cur = conn.cursor()
@@ -1624,40 +1721,57 @@ def download_prefilled_scorecards_pdf(comp_id: int):
     selected_shooters: List[Dict[str, Any]] = []
     suffix = "Gesamt"
 
-    if mode == "shooter" and value:
-        selected_shooters = [s for s in shooters if str(s["id"]) == str(value)]
-        if selected_shooters:
-            s0 = selected_shooters[0]
-            suffix = _safe_filename_part(f"{s0['last_name']}_{s0['first_name']}")
-        else:
-            suffix = "Schuetze"
-    elif mode in ("class", "klasse", "club", "verein", "group", "gruppe"):
-        grouped = _group_shooters_for_pdf(shooters, mode)
-        if value is not None and value != "":
-            for k, lbl, items in grouped:
-                if k == value or lbl == value:
-                    selected_shooters = items
-                    prefix_map = {"class": "Klasse", "klasse": "Klasse", "club": "Verein", "verein": "Verein", "group": "Gruppe", "gruppe": "Gruppe"}
-                    suffix = f"{prefix_map.get(mode, 'Auswahl')}_{_safe_filename_part(lbl)}"
-                    break
-        else:
-            # If no specific value filter passed, concatenate all groups in sorted order
-            for _, _, items in grouped:
-                selected_shooters.extend(items)
-            suffix = f"Alle_nach_{_safe_filename_part(mode)}"
+    if pair_mode in ("manual", "2_shooters_manual"):
+        per_page = 2
+        manual_pairs = _parse_manual_pairs_param(pairs_param, shooters)
+        suffix = "Manuelle_Paare"
     else:
-        grouped = _group_shooters_for_pdf(shooters, "all")
-        selected_shooters = grouped[0][2] if grouped else []
-        suffix = "Gesamt"
+        manual_pairs = None
+        if mode == "shooter" and value:
+            selected_shooters = [s for s in shooters if str(s["id"]) == str(value)]
+            if selected_shooters:
+                s0 = selected_shooters[0]
+                suffix = _safe_filename_part(f"{s0['last_name']}_{s0['first_name']}")
+            else:
+                suffix = "Schuetze"
+        elif mode in ("class", "klasse", "club", "verein", "group", "gruppe"):
+            grouped = _group_shooters_for_pdf(shooters, mode)
+            if value is not None and value != "":
+                for k, lbl, items in grouped:
+                    if k == value or lbl == value:
+                        selected_shooters = items
+                        prefix_map = {"class": "Klasse", "klasse": "Klasse", "club": "Verein", "verein": "Verein", "group": "Gruppe", "gruppe": "Gruppe"}
+                        suffix = f"{prefix_map.get(mode, 'Auswahl')}_{_safe_filename_part(lbl)}"
+                        break
+            else:
+                # If no specific value filter passed, concatenate all groups in sorted order
+                for _, _, items in grouped:
+                    selected_shooters.extend(items)
+                suffix = f"Alle_nach_{_safe_filename_part(mode)}"
+        else:
+            grouped = _group_shooters_for_pdf(shooters, "all")
+            selected_shooters = grouped[0][2] if grouped else []
+            suffix = "Gesamt"
 
     pdf_bytes = scorecard_pdf.generate_prefilled_scorecards_pdf_bytes(
         shooters=selected_shooters,
         competition=comp_dict,
         halves=halves,
         override_distance=override_distance,
+        per_page=per_page,
+        pair_mode=pair_mode,
+        manual_pairs=manual_pairs,
     )
 
-    filename = f"Schiesszettel_{comp_safe}_{suffix}.pdf"
+    layout_tag = ""
+    if pair_mode in ("adjacent", "2_shooters_auto"):
+        layout_tag = "_2Schuetzen_Scheiben"
+    elif pair_mode in ("manual", "2_shooters_manual"):
+        layout_tag = "_2Schuetzen"
+    elif per_page == 2:
+        layout_tag = "_2auf1"
+
+    filename = f"Schiesszettel_{comp_safe}_{suffix}{layout_tag}.pdf"
     return send_file(
         io.BytesIO(pdf_bytes),
         as_attachment=True,
@@ -1675,6 +1789,9 @@ def download_prefilled_scorecards_zip(comp_id: int):
     mode = (request.args.get("mode") or "class").strip().lower()
     halves = _parse_halves_param(request.args.get("half") or "both")
     override_distance = (request.args.get("distance") or "").strip() or None
+    per_page_raw = (request.args.get("per_page") or "1").strip()
+    per_page = 2 if per_page_raw == "2" else 1
+    pair_mode = (request.args.get("pair_mode") or "same_shooter").strip().lower()
 
     conn = get_db()
     cur = conn.cursor()
@@ -1708,6 +1825,8 @@ def download_prefilled_scorecards_zip(comp_id: int):
                 competition=comp_dict,
                 halves=halves,
                 override_distance=override_distance,
+                per_page=per_page,
+                pair_mode=pair_mode,
             )
             zf.writestr(f"Schiesszettel_{comp_safe}_Leer.pdf", pdf_bytes)
         else:
@@ -1727,6 +1846,8 @@ def download_prefilled_scorecards_zip(comp_id: int):
                     competition=comp_dict,
                     halves=halves,
                     override_distance=override_distance,
+                    per_page=per_page,
+                    pair_mode=pair_mode,
                 )
                 zf.writestr(fname, pdf_bytes)
 

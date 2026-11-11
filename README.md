@@ -33,8 +33,9 @@ Für eine detaillierte Schritt-für-Schritt-Anleitung mit vielen Praxistipps fü
   - Unterstützt sowohl die direkte Live-Kamera (HTTPS) als auch die native Smartphone-Kamera (HTTP).
 - 📄 **Druckfertiger Schießzettel-PDF-Generator:**
   - Erstellt offizielle, normgerechte Wertungsbögen im Original-Layout.
-  - Wahlweise als Gesamt-PDF, aufgeteilt nach Klassen, Vereinen oder Gruppen/Ständen (auch als gebündeltes ZIP-Archiv).
-  - Inklusive Leervorlagen-Druck für spontane Nachmelder.
+  - Wahlweise **1 Zettel pro DIN A4 Seite** oder **2 Zettel auf einer DIN A4 Seite** (je Schütze A+B nebeneinander).
+  - **2 Schützen pro Seite (gleiche Schießhälfte):** Automatische Paarung benachbarter Schützen einer Gruppe (**Scheibe 1+2, 3+4, …**, inkl. nicht vorbefülltem Zettel bei freier Scheibe) oder **manuelle Zusammenstellung** von jeweils zwei Schützen.
+  - Wahlweise als Gesamt-PDF, aufgeteilt nach Klassen, Vereinen oder Gruppen/Ständen (auch als gebündeltes ZIP-Archiv) sowie Leervorlagen-Druck.
 - 🏆 **Echtzeit-Ergebnisliste:**
   - Live-Aktualisierung alle 3 Sekunden – ideal für die Anzeige auf einem Großbildschirm oder Beamer im Schützenhaus.
   - Rangberechnung: Höchste Ringzahl, bei Gleichstand Auswertung der 10er und 9er.
